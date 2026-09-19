@@ -58,7 +58,7 @@ def command(args: list[str], root: Path) -> bytes:
 
 
 def github(path: str, root: Path) -> dict:
-    require(path.startswith(f"repos/{GITHUB_REPO}/"), "GITHUB_PATH_DENIED")
+    require(path == f"repos/{GITHUB_REPO}" or path.startswith(f"repos/{GITHUB_REPO}/"), "GITHUB_PATH_DENIED")
     try:
         document = json.loads(command(["gh", "api", path], root))
     except (ValueError, UnicodeError):
@@ -106,7 +106,7 @@ def source_snapshot(root: Path, get=github) -> dict:
     origin = command(["git", "remote", "get-url", "origin"], root).decode().strip()
     require(origin in {f"https://github.com/{GITHUB_REPO}.git", f"https://github.com/{GITHUB_REPO}",
                        f"git@github.com:{GITHUB_REPO}.git"}, "SOURCE_ORIGIN_DENIED")
-    repository = get(f"repos/{GITHUB_REPO}/", root)
+    repository = get(f"repos/{GITHUB_REPO}", root)
     require(repository.get("full_name") == GITHUB_REPO and repository.get("private") is True
             and repository.get("default_branch") == "main", "PRIVATE_SOURCE_REPO_REQUIRED")
     protection = get(f"repos/{GITHUB_REPO}/branches/main/protection", root)

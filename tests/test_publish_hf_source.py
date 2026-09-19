@@ -228,6 +228,23 @@ class SourceIdentityTests(unittest.TestCase):
         with self.assertRaisesRegex(publisher.PublicationError, "SOURCE_TREE_NOT_CLEAN"):
             self.snapshot()
 
+    def test_repository_metadata_uses_exact_github_route_without_trailing_slash(self):
+        observed = []
+        def get(path, root):
+            observed.append(path)
+            return self.github(path, root)
+        with patch.object(publisher, "command", side_effect=self.command):
+            publisher.source_snapshot(Path("."), get=get)
+        self.assertEqual(observed[0], "repos/" + publisher.GITHUB_REPO)
+
+    def test_exact_repository_route_is_allowed_but_sibling_and_external_are_not(self):
+        with patch.object(publisher, "command", return_value=b'{"private":true}') as run:
+            self.assertTrue(publisher.github("repos/" + publisher.GITHUB_REPO, Path("."))["private"])
+            self.assertEqual(run.call_args.args[0], ["gh", "api", "repos/" + publisher.GITHUB_REPO])
+            for path in ("repos/" + publisher.GITHUB_REPO + "-other", "https://attacker.invalid"):
+                with self.subTest(path=path), self.assertRaisesRegex(publisher.PublicationError, "GITHUB_PATH_DENIED"):
+                    publisher.github(path, Path("."))
+
     def test_relaxed_main_protection_is_denied(self):
         original = copy.deepcopy(self.documents["protection"])
         for field in ("required_signatures", "required_linear_history", "enforce_admins",
