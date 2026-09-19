@@ -1,0 +1,131 @@
+# Copy this file outside source control, replace every REPLACE_* value, and
+# provide it with -var-file. This deliberately does not contain plausible IDs,
+# ARNs, routes, destinations, or human identities.
+
+aws_region         = "REPLACE_AWS_REGION"
+witness_aws_region = "REPLACE_WITNESS_AWS_REGION"
+
+workload_account_id = "REPLACE_12_DIGIT_ACCOUNT_ID"
+witness_account_id  = "REPLACE_DIFFERENT_12_DIGIT_ACCOUNT_ID"
+
+workload_deployer_role_arn = "REPLACE_WORKLOAD_DEPLOYER_ROLE_ARN"
+witness_deployer_role_arn  = "REPLACE_WITNESS_DEPLOYER_ROLE_ARN"
+
+security_approver_role_arn = "REPLACE_IDENTITY_CENTER_SECURITY_ROLE_ARN"
+release_approver_role_arn  = "REPLACE_DIFFERENT_IDENTITY_CENTER_RELEASE_ROLE_ARN"
+witness_approver_role_arn  = "REPLACE_WITNESS_ACCOUNT_IDENTITY_CENTER_ROLE_ARN"
+security_approver_user_id  = "REPLACE_SECURITY_IDENTITY_CENTER_USER_ID"
+security_identity_store_arn = "REPLACE_SECURITY_IDENTITY_STORE_ARN"
+release_approver_user_id   = "REPLACE_DIFFERENT_RELEASE_IDENTITY_CENTER_USER_ID"
+release_identity_store_arn = "REPLACE_RELEASE_IDENTITY_STORE_ARN"
+witness_approver_user_id   = "REPLACE_DIFFERENT_WITNESS_IDENTITY_CENTER_USER_ID"
+witness_identity_store_arn = "REPLACE_WITNESS_ACCOUNT_IDENTITY_STORE_ARN"
+witness_evidence_auditor_role_arns = [
+  "REPLACE_WITNESS_ACCOUNT_AUDITOR_ROLE_ARN",
+]
+
+eks_cluster_name         = "REPLACE_EXACT_EKS_CLUSTER_NAME"
+eks_cluster_security_group_id = "REPLACE_EXACT_EKS_CLUSTER_SECURITY_GROUP_ID"
+vpc_cni_addon_version    = "REPLACE_EKS_COMPATIBLE_VPC_CNI_VERSION"
+vpc_cni_service_account_role_arn = "REPLACE_DEDICATED_VPC_CNI_IRSA_ROLE_ARN"
+eks_oidc_provider_arn    = "REPLACE_EKS_OIDC_PROVIDER_ARN"
+eks_oidc_issuer_hostpath = "REPLACE_OIDC_ISSUER_WITHOUT_HTTPS_SCHEME"
+workload_namespace       = "safe-qa-system"
+workload_service_account = "safe-qa-control-plane"
+sandbox_namespace         = "safe-qa-agent-sandbox"
+
+sandbox_node_subnets = {
+  sandbox_a = {
+    subnet_id         = "REPLACE_PRIVATE_SANDBOX_NODE_SUBNET_A"
+    route_table_id    = "REPLACE_FIREWALL_STEERED_ROUTE_TABLE_A"
+    availability_zone = "REPLACE_AVAILABILITY_ZONE_A"
+  }
+  sandbox_b = {
+    subnet_id         = "REPLACE_PRIVATE_SANDBOX_NODE_SUBNET_B"
+    route_table_id    = "REPLACE_FIREWALL_STEERED_ROUTE_TABLE_B"
+    availability_zone = "REPLACE_AVAILABILITY_ZONE_B"
+  }
+}
+
+sandbox_node_instance_types = ["REPLACE_REVIEWED_X86_64_INSTANCE_TYPE"]
+sandbox_root_volume_size_gib = 40
+sandbox_node_min_size         = 1
+sandbox_node_desired_size     = 1
+sandbox_node_max_size         = 3
+
+# Enumerate only exact private endpoint, resolver, and node-maintenance paths.
+# These are security-group capabilities; every routable destination must also
+# be in a firewall-steered route table.
+sandbox_node_egress_rules = {
+  private_endpoints_https = {
+    description = "Reviewed ECR and AWS interface endpoints"
+    cidr_ipv4    = "REPLACE_EXACT_INTERFACE_ENDPOINTS_CIDR"
+    from_port    = 443
+    to_port      = 443
+    ip_protocol  = "tcp"
+  }
+  vpc_dns_udp = {
+    description = "VPC resolver UDP"
+    cidr_ipv4    = "REPLACE_EXACT_VPC_RESOLVER_CIDR"
+    from_port    = 53
+    to_port      = 53
+    ip_protocol  = "udp"
+  }
+  vpc_dns_tcp = {
+    description = "VPC resolver TCP"
+    cidr_ipv4    = "REPLACE_EXACT_VPC_RESOLVER_CIDR"
+    from_port    = 53
+    to_port      = 53
+    ip_protocol  = "tcp"
+  }
+  amazon_time_sync = {
+    description = "Amazon Time Sync Service"
+    cidr_ipv4    = "169.254.169.123/32"
+    from_port    = 123
+    to_port      = 123
+    ip_protocol  = "udp"
+  }
+}
+
+vpc_id = "REPLACE_VPC_ID"
+firewall_subnet_ids = [
+  "REPLACE_DEDICATED_FIREWALL_SUBNET_A",
+  "REPLACE_DEDICATED_FIREWALL_SUBNET_B",
+]
+
+# Include every route required for symmetric inspection. The example is
+# intentionally invalid until exact route tables and Availability Zones are
+# supplied.
+protected_routes = {
+  sandbox_default_a = {
+    route_table_id         = "REPLACE_FIREWALL_STEERED_ROUTE_TABLE_A"
+    destination_cidr_block = "REPLACE_REVIEWED_DESTINATION_CIDR_A"
+    availability_zone      = "REPLACE_AVAILABILITY_ZONE_A"
+  }
+  sandbox_default_b = {
+    route_table_id         = "REPLACE_FIREWALL_STEERED_ROUTE_TABLE_B"
+    destination_cidr_block = "REPLACE_REVIEWED_DESTINATION_CIDR_B"
+    availability_zone      = "REPLACE_AVAILABILITY_ZONE_B"
+  }
+}
+
+network_firewall_capacity = 100
+
+# Replace this with reviewed strict-order Suricata rules that enumerate exact
+# allowed destinations and end with a reviewed
+# `drop|reject ip any any -> any any (...)` catch-all rule.
+suricata_rules = <<-RULES
+  REPLACE_WITH_REVIEWED_STRICT_ORDER_SURICATA_RULES
+RULES
+
+# Empty sets disable credential/session revocation. Never put wildcards or the
+# generated <name_prefix>-runtime role ARN here.
+revocable_iam_user_arns = []
+revocable_iam_role_arns = []
+
+name_prefix = "REPLACE_GLOBALLY_DISTINGUISHABLE_PREFIX"
+
+tags = {
+  Environment = "production"
+  Owner       = "REPLACE_NAMED_OWNER"
+}

@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.0",
+  "production_account_id": "REPLACE_WITH_12_DIGIT_PRODUCTION_ACCOUNT_ID",
+  "security_owner": {
+    "key_arn": "REPLACE_WITH_SECURITY_OWNER_ASYMMETRIC_KMS_KEY_ARN",
+    "identity_store_arn": "REPLACE_WITH_IDENTITY_STORE_ARN",
+    "identity_center_user_id": "REPLACE_WITH_IMMUTABLE_SECURITY_OWNER_USER_ID",
+    "principal_arn": "REPLACE_WITH_SECURITY_OWNER_IDENTITY_CENTER_ROLE_ARN"
+  },
+  "release_owner": {
+    "key_arn": "REPLACE_WITH_RELEASE_OWNER_ASYMMETRIC_KMS_KEY_ARN",
+    "identity_store_arn": "REPLACE_WITH_IDENTITY_STORE_ARN",
+    "identity_center_user_id": "REPLACE_WITH_IMMUTABLE_RELEASE_OWNER_USER_ID",
+    "principal_arn": "REPLACE_WITH_RELEASE_OWNER_IDENTITY_CENTER_ROLE_ARN"
+  },
+  "witness": {
+    "key_arn": "REPLACE_WITH_CROSS_ACCOUNT_WITNESS_ASYMMETRIC_KMS_KEY_ARN",
+    "identity_store_arn": "REPLACE_WITH_WITNESS_IDENTITY_STORE_ARN",
+    "identity_center_user_id": "REPLACE_WITH_IMMUTABLE_WITNESS_USER_ID",
+    "principal_arn": "REPLACE_WITH_WITNESS_IDENTITY_CENTER_ROLE_ARN"
+  }
+}

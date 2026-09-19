@@ -1,0 +1,10 @@
+# Explicit local-only opt-in. No OpenRouter key or cloud provider is enabled.
+services:
+  gateway:
+    environment:
+      SZL_ENABLE_OLLAMA: "true"
+      SZL_ALLOW_DOCKER_HOST_OLLAMA: "true"
+      SZL_OLLAMA_ORIGIN: http://host.docker.internal:11434
+      SZL_OLLAMA_MODEL: ${SZL_LOCAL_OLLAMA_MODEL:?select an installed local model}
+      SZL_PROVIDER_TIMEOUT_SECONDS: "30"
+      SZL_MAX_GENERATION_TOKENS: "64"

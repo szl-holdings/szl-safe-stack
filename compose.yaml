@@ -1,0 +1,90 @@
+name: szl-safe-stack
+
+services:
+  postgres:
+    image: postgres:16.15-alpine@sha256:3c5c8892d184f738f4fe282d14ddaa613a38f00f4189d2d94725ebe6f2909ddb
+    environment:
+      POSTGRES_DB: safeqa
+      POSTGRES_USER: safeqa
+      POSTGRES_PASSWORD: local-development-only
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U safeqa -d safeqa]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./safe-qa-service/db/migrations/001_audit_ledger.sql:/docker-entrypoint-initdb.d/001_audit_ledger.sql:ro
+      - ./safe-qa-service/db/migrations/002_control_plane.sql:/docker-entrypoint-initdb.d/002_control_plane.sql:ro
+      - ./safe-qa-service/db/migrations/003_durable_evidence_outbox.sql:/docker-entrypoint-initdb.d/003_durable_evidence_outbox.sql:ro
+    networks: [audit]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  safeqa:
+    image: szl-safeqa-local:${SZL_BUILD_TAG:-dev}
+    build:
+      context: ./safe-qa-service
+    environment:
+      DATABASE_URL: postgresql://safeqa:local-development-only@postgres:5432/safeqa
+      SAFE_QA_AUTH_TOKEN_HASHES_JSON: ${SAFE_QA_AUTH_TOKEN_HASHES_JSON:?set the Safe QA token hash map}
+      SAFE_QA_PRODUCTION_MODE: "false"
+      SAFE_QA_AUTH_MODE: static
+      AWS_EC2_METADATA_DISABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - 127.0.0.1:${SAFE_QA_LOCAL_PORT:-8080}:8080
+    networks: [audit]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health/ready', timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  gateway:
+    image: szl-frontier-gateway-local:${SZL_BUILD_TAG:-dev}
+    build:
+      context: ./frontier-evidence-gateway
+    environment:
+      SZL_GATEWAY_BEARER_TOKEN: ${SZL_GATEWAY_BEARER_TOKEN:?set a separate gateway bearer token}
+      SZL_GATEWAY_BIND: 0.0.0.0
+      SZL_ALLOW_NON_LOOPBACK_BIND: "true"
+      SZL_GATEWAY_DB: /data/frontier-receipts.sqlite3
+      SZL_ENABLE_OLLAMA: "false"
+      SZL_ENABLE_OPENROUTER: "false"
+    ports:
+      - 127.0.0.1:${SZL_GATEWAY_LOCAL_PORT:-8787}:8787
+    volumes:
+      - gateway-receipts:/data
+    networks: [gateway]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: [CMD, python, -c, "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8787/health/ready', headers={'Authorization': 'Bearer ' + os.environ['SZL_GATEWAY_BEARER_TOKEN']}); urllib.request.urlopen(request, timeout=2)"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
+networks:
+  audit:
+    driver: bridge
+  gateway:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  gateway-receipts:

@@ -1,0 +1,19 @@
+{
+  "https://REPLACE_WITH_ORGANIZATIONAL_ISSUER": {
+    "audience": "safe-qa-control-plane",
+    "jwks_url": "https://REPLACE_WITH_ORGANIZATIONAL_ISSUER/.well-known/jwks.json",
+    "algorithms": [
+      "RS256"
+    ],
+    "required_acr": [
+      "REPLACE_WITH_PHISHING_RESISTANT_MFA_ACR"
+    ],
+    "required_amr": [
+      "mfa"
+    ],
+    "principal_type_claim": "safe_qa_principal_type",
+    "scopes_claim": "scope",
+    "groups_claim": "groups",
+    "max_token_lifetime_seconds": 900
+  }
+}

@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16.15-alpine@sha256:3c5c8892d184f738f4fe282d14ddaa613a38f00f4189d2d94725ebe6f2909ddb
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_DB: safeqa
+      POSTGRES_USER: safeqa
+      POSTGRES_PASSWORD: local-development-only
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U safeqa -d safeqa"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - safeqa-postgres:/var/lib/postgresql/data
+      - ./db/migrations/001_audit_ledger.sql:/docker-entrypoint-initdb.d/001_audit_ledger.sql:ro
+      - ./db/migrations/002_control_plane.sql:/docker-entrypoint-initdb.d/002_control_plane.sql:ro
+      - ./db/migrations/003_durable_evidence_outbox.sql:/docker-entrypoint-initdb.d/003_durable_evidence_outbox.sql:ro
+
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      DATABASE_URL: postgresql://safeqa:local-development-only@postgres:5432/safeqa
+      SAFE_QA_AUTH_TOKEN_HASHES_JSON: ${SAFE_QA_AUTH_TOKEN_HASHES_JSON:?Set SAFE_QA_AUTH_TOKEN_HASHES_JSON}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  safeqa-postgres:

@@ -1,0 +1,31 @@
+services:
+  frontier-evidence-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      SZL_GATEWAY_BEARER_TOKEN: ${SZL_GATEWAY_BEARER_TOKEN:?set a bearer token of at least 32 bytes}
+      SZL_ALLOW_NON_LOOPBACK_BIND: "true"
+      SZL_ENABLE_OLLAMA: "true"
+      SZL_OLLAMA_ORIGIN: http://host.docker.internal:11434
+      SZL_ALLOW_DOCKER_HOST_OLLAMA: "true"
+      SZL_OLLAMA_MODEL: ${SZL_OLLAMA_MODEL:-szl-nemo:latest}
+      SZL_MAX_GENERATION_TOKENS: ${SZL_MAX_GENERATION_TOKENS:-256}
+      SZL_ENABLE_OPENROUTER: "false"
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:8787:8787
+    volumes:
+      - frontier-receipts:/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+
+volumes:
+  frontier-receipts:

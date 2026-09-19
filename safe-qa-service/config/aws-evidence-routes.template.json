@@ -1,0 +1,14 @@
+[
+  {
+    "account_id": "REPLACE_WITH_PRODUCTION_ACCOUNT_ID",
+    "region": "REPLACE_WITH_PRODUCTION_REGION",
+    "reader_role_arn": null,
+    "external_id": null
+  },
+  {
+    "account_id": "REPLACE_WITH_WITNESS_KEY_ACCOUNT_ID",
+    "region": "REPLACE_WITH_WITNESS_KEY_REGION",
+    "reader_role_arn": "REPLACE_WITH_WITNESS_VERIFY_AND_CLOUDTRAIL_READER_ROLE_ARN",
+    "external_id": "REPLACE_WITH_SEPARATELY_GOVERNED_EXTERNAL_ID"
+  }
+]

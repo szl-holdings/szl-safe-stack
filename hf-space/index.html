@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<title>SZL Safe Stack · Source</title>
+<style>
+body{font:18px/1.6 system-ui,sans-serif;max-width:780px;margin:7vh auto;padding:24px;color:#dce5ef;background:#111a25}
+h1{font-size:clamp(2rem,5vw,3.5rem);line-height:1.1;margin-bottom:24px}a{color:#8dcaff}code{overflow-wrap:anywhere;font-size:.85em}li{margin:12px 0}.label{color:#9fb1c5;letter-spacing:.12em;text-transform:uppercase;font-size:.8rem}.note{border-left:3px solid #506780;padding-left:20px;margin-top:36px}
+</style>
+<main>
+<p class="label">SZL Holdings · Private source distribution</p>
+<h1>Safe Stack</h1>
+<p>Python services for policy decisions, approval verification, a PostgreSQL audit ledger, and evidence reporting. This release includes source, tests, containers, and deployment documentation.</p>
+<ul>
+<li><a href="source.tar.gz" download>Download the source archive</a></li>
+<li><a href="source_payload.md" download>Download one Markdown + Python payload</a></li>
+<li><a href="source-manifest.json">Inspect file hashes and source manifest</a></li>
+<li><a href="https://github.com/szl-holdings/szl-safe-stack/tree/{{SOURCE_SHA}}">Open the exact GitHub source</a></li>
+</ul>
+<p>GitHub revision<br><code>{{SOURCE_SHA}}</code></p>
+<p>Archive SHA-256<br><code>{{ARCHIVE_SHA256}}</code></p>
+<p class="note">This is a static source download page. The API and database require separate installation and deployment. Publishing these files does not establish cloud enforcement, external credential revocation, independent approvals, or trained models. Clinical and biological claims remain unverified.</p>
+<p>The Python payload verifies the included archive and extracts it into a new directory. Read the extracted README before installing dependencies or deploying services.</p>
+</main>
+</html>

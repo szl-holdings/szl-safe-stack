@@ -1,0 +1,29 @@
+{
+  "account_id": "REPLACE_WITH_12_DIGIT_PRODUCTION_ACCOUNT_ID",
+  "region": "REPLACE_WITH_AWS_REGION",
+  "runtime_principal_arn": "REPLACE_WITH_EXACT_CONTROL_PLANE_IAM_ROLE_ARN",
+  "eks": [
+    {
+      "cluster_name": "REPLACE_WITH_EXACT_EKS_CLUSTER",
+      "namespace": "REPLACE_WITH_CONTROL_PLANE_NAMESPACE",
+      "deployments": [
+        "safe-qa-service"
+      ],
+      "allow_emergency_isolation": false
+    },
+    {
+      "cluster_name": "REPLACE_WITH_EXACT_EKS_CLUSTER",
+      "namespace": "safe-qa-agent-sandbox",
+      "deployments": [],
+      "allow_emergency_isolation": true
+    }
+  ],
+  "iam_access_keys": {
+    "REPLACE_WITH_EXACT_IAM_USER": [
+      "REPLACE_WITH_EXACT_ACCESS_KEY_ID"
+    ]
+  },
+  "iam_roles": [
+    "REPLACE_WITH_EXACT_REVOCABLE_ROLE_NAME"
+  ]
+}

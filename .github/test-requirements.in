@@ -1,0 +1,7 @@
+# Compile with uv for Python 3.12, preserving service/build constraints.
+-c ../safe-qa-service/requirements.lock
+-c ../safe-qa-service/build-requirements.lock
+httpx==0.28.1
+pytest==9.0.3
+pytest-cov==6.2.1
+ruff==0.12.5

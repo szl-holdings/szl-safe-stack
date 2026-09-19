@@ -1,0 +1,1005 @@
+# This is a template, not an applied manifest. Every dollar-brace placeholder
+# is mandatory and must be rendered from a reviewed deployment record.
+# Admission must reject unresolved values and non-repository@sha256 images.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ${SAFE_QA_NAMESPACE}
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    safe-qa.io/firewall-enforced: "true"
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: safe-qa-agent-sandbox
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest
+    safe-qa.io/dedicated-agent-namespace: "true"
+    safe-qa.io/runtime: ec2-network-policy-sandbox
+    safe-qa.io/firewall-enforced: "true"
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: safe-qa-agent-sandbox
+  namespace: safe-qa-agent-sandbox
+  labels:
+    safe-qa.io/credential-boundary: no-provider-identity
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: safe-qa-agent-sandbox
+  namespace: safe-qa-agent-sandbox
+spec:
+  hard:
+    pods: "20"
+    count/jobs.batch: "20"
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "16"
+    limits.memory: 32Gi
+    requests.ephemeral-storage: 8Gi
+    limits.ephemeral-storage: 16Gi
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: safe-qa-agent-sandbox
+  namespace: safe-qa-agent-sandbox
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 100m
+        memory: 128Mi
+        ephemeral-storage: 128Mi
+      default:
+        cpu: 500m
+        memory: 512Mi
+        ephemeral-storage: 512Mi
+      max:
+        cpu: "2"
+        memory: 2Gi
+        ephemeral-storage: 2Gi
+    - type: Pod
+      max:
+        cpu: "2"
+        memory: 2Gi
+        ephemeral-storage: 2Gi
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ${SAFE_QA_SERVICE_ACCOUNT}
+  namespace: ${SAFE_QA_NAMESPACE}
+  annotations:
+    eks.amazonaws.com/role-arn: ${AWS_RUNTIME_ROLE_ARN}
+    eks.amazonaws.com/sts-regional-endpoints: "true"
+  labels:
+    app.kubernetes.io/name: safe-qa-service
+automountServiceAccountToken: true
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: safe-qa-managed-workload
+  namespace: ${SAFE_QA_NAMESPACE}
+  labels:
+    safe-qa.io/credential-boundary: no-provider-identity
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: safe-qa-aws-target-policy
+  namespace: ${SAFE_QA_NAMESPACE}
+data:
+  SAFE_QA_AWS_TARGET_POLICY_JSON: |-
+    {
+      "account_id": "${AWS_ACCOUNT_ID}",
+      "region": "${AWS_REGION}",
+      "runtime_principal_arn": "${AWS_RUNTIME_ROLE_ARN}",
+      "controller_namespace": "${SAFE_QA_NAMESPACE}",
+      "controller_service_account": "${SAFE_QA_SERVICE_ACCOUNT}",
+      "network_policy_admin_group": "${NETWORK_POLICY_ADMIN_GROUP}",
+      "eks": [
+        {
+          "cluster_name": "${EKS_CLUSTER_NAME}",
+          "namespace": "${SAFE_QA_NAMESPACE}",
+          "deployments": [
+            {
+              "deployment_name": "safe-qa-managed-workload",
+              "container_name": "workload",
+              "image_repository": "${MANAGED_IMAGE_REPOSITORY}",
+              "service_account_name": "safe-qa-managed-workload"
+            }
+          ],
+          "allow_emergency_isolation": false
+        },
+        {
+          "cluster_name": "${EKS_CLUSTER_NAME}",
+          "namespace": "safe-qa-agent-sandbox",
+          "deployments": [],
+          "allow_emergency_isolation": true
+        }
+      ],
+      "iam_access_keys": ${IAM_ACCESS_KEY_TARGETS_JSON},
+      "iam_roles": ${IAM_ROLE_TARGETS_JSON}
+    }
+immutable: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: safe-qa-service
+  namespace: ${SAFE_QA_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: safe-qa-service
+    app.kubernetes.io/version: ${APP_VERSION}
+spec:
+  replicas: 3
+  revisionHistoryLimit: 3
+  minReadySeconds: 15
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: safe-qa-service
+        app.kubernetes.io/version: ${APP_VERSION}
+        safe-qa.io/control-plane: "true"
+      annotations:
+        safe-qa.io/source-revision: ${SOURCE_REVISION}
+        safe-qa.io/image-digest: sha256:${IMAGE_DIGEST}
+    spec:
+      serviceAccountName: ${SAFE_QA_SERVICE_ACCOUNT}
+      automountServiceAccountToken: true
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: safe-qa-service
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: safe-qa-service
+      containers:
+        - name: api
+          image: "${IMAGE_REPOSITORY}@sha256:${IMAGE_DIGEST}"
+          imagePullPolicy: IfNotPresent
+          args:
+            - uvicorn
+            - safe_qa_service.app:app
+            - --host=0.0.0.0
+            - --port=8080
+            - --proxy-headers
+            - --forwarded-allow-ips=${TRUSTED_PROXY_CIDRS}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: SAFE_QA_PRODUCTION_MODE
+              value: "true"
+            - name: SAFE_QA_AUTH_MODE
+              value: oidc
+            - name: AWS_REGION
+              value: ${AWS_REGION}
+            - name: AWS_STS_REGIONAL_ENDPOINTS
+              value: regional
+            - name: SAFE_QA_AWS_TARGET_POLICY_JSON
+              valueFrom:
+                configMapKeyRef:
+                  name: safe-qa-aws-target-policy
+                  key: SAFE_QA_AWS_TARGET_POLICY_JSON
+          envFrom:
+            - secretRef:
+                name: ${RUNTIME_CONFIG_SECRET_NAME}
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: safe-qa-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: safe-qa-managed-workload
+  namespace: ${SAFE_QA_NAMESPACE}
+  labels:
+    app.kubernetes.io/name: safe-qa-managed-workload
+    safe-qa.io/provider-managed: "true"
+spec:
+  replicas: 2
+  revisionHistoryLimit: 3
+  minReadySeconds: 10
+  progressDeadlineSeconds: 300
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-managed-workload
+      safe-qa.io/provider-managed: "true"
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: safe-qa-managed-workload
+        safe-qa.io/provider-managed: "true"
+      annotations:
+        safe-qa.io/source-revision: ${MANAGED_SOURCE_REVISION}
+        safe-qa.io/image-digest: sha256:${MANAGED_IMAGE_DIGEST}
+    spec:
+      serviceAccountName: safe-qa-managed-workload
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 10
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: safe-qa-managed-workload
+              safe-qa.io/provider-managed: "true"
+      containers:
+        - name: workload
+          image: "${MANAGED_IMAGE_REPOSITORY}@sha256:${MANAGED_IMAGE_DIGEST}"
+          imagePullPolicy: IfNotPresent
+          readinessProbe:
+            exec:
+              command: ["python", "-I", "-B", "-c", "raise SystemExit(0)"]
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["python", "-I", "-B", "-c", "raise SystemExit(0)"]
+            periodSeconds: 30
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+              ephemeral-storage: 64Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+              ephemeral-storage: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: safe-qa-service
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: safe-qa-service
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: safe-qa-service
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: safe-qa-managed-workload
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-managed-workload
+      safe-qa.io/provider-managed: "true"
+---
+# Control-plane namespace defaults to no ingress and no egress. The following
+# named policies are the complete network capability set for this workload.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-default-deny
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: safe-qa.io/provider-managed
+        operator: NotIn
+        values: ["true"]
+  policyTypes: ["Ingress", "Egress"]
+---
+# Preserve default-deny for pods that do not carry the provider-managed key.
+# Together with the NotIn policy above, this excludes only the exact managed
+# target, whose sole policy is the immutable isolation object below.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-default-deny-provider-label-absent
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: safe-qa.io/provider-managed
+        operator: DoesNotExist
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-managed-workload-isolation
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-managed-workload
+      safe-qa.io/provider-managed: "true"
+  policyTypes: ["Ingress", "Egress"]
+  ingress: []
+  egress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-ingress
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ${INGRESS_NAMESPACE}
+          podSelector:
+            matchLabels:
+              ${INGRESS_POD_LABEL_KEY}: ${INGRESS_POD_LABEL_VALUE}
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-dns-egress
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-postgres-egress
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ${POSTGRES_NAMESPACE}
+          podSelector:
+            matchLabels:
+              ${POSTGRES_POD_LABEL_KEY}: ${POSTGRES_POD_LABEL_VALUE}
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# AWS KMS, STS, and CloudTrail should use interface VPC endpoints. This CIDR is
+# the exact endpoint subnet range, not 0.0.0.0/0; Network Firewall remains the
+# independent VPC-level enforcement layer.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-aws-api-egress
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: ${AWS_INTERFACE_ENDPOINTS_CIDR}
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# OIDC token verification retrieves JWKS over HTTPS. This CIDR must be the
+# exact internal mirror, egress proxy, or reviewed issuer endpoint range; the
+# default-deny policy blocks token admission if this path is absent or wrong.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-oidc-jwks-egress
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: ${OIDC_JWKS_ENDPOINTS_CIDR}
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# The in-cluster controller needs only the API server and only because the Role
+# below permits patching one pre-existing allow policy in the dedicated agent
+# namespace. It cannot create or delete NetworkPolicies.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-kubernetes-api-egress
+  namespace: ${SAFE_QA_NAMESPACE}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: safe-qa-service
+  policyTypes: ["Egress"]
+  egress:
+    - to:
+        - ipBlock:
+            cidr: ${KUBERNETES_API_SERVER_CIDR}
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# The dedicated EC2 Linux sandbox namespace is isolated by default. The only
+# mutable network capability is the named approved-egress policy below, whose
+# installed state is empty. Additive policies are rejected by admission.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-agent-default-deny
+  namespace: safe-qa-agent-sandbox
+spec:
+  podSelector: {}
+  policyTypes: ["Ingress", "Egress"]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: safe-qa-approved-egress
+  namespace: safe-qa-agent-sandbox
+  labels:
+    safe-qa.io/controller-owned: "true"
+spec:
+  podSelector:
+    {}
+  policyTypes: ["Egress"]
+  # Zero egress includes DNS, VPC addresses, IMDS 169.254.169.254, and task
+  # metadata 169.254.170.2 when the selected provider enforces this policy.
+  # Any later grant is a separately approved patch and must exclude link-local.
+  egress: []
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: safe-qa-isolation-controller
+  namespace: safe-qa-agent-sandbox
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    resourceNames: ["safe-qa-approved-egress"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: safe-qa-isolation-controller
+  namespace: safe-qa-agent-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: ${SAFE_QA_SERVICE_ACCOUNT}
+    namespace: ${SAFE_QA_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: safe-qa-isolation-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: safe-qa-deployment-controller
+  namespace: ${SAFE_QA_NAMESPACE}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["safe-qa-managed-workload"]
+    verbs: ["get", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: safe-qa-deployment-controller
+  namespace: ${SAFE_QA_NAMESPACE}
+subjects:
+  - kind: ServiceAccount
+    name: ${SAFE_QA_SERVICE_ACCOUNT}
+    namespace: ${SAFE_QA_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: safe-qa-deployment-controller
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: safe-qa-provider-readback
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    resourceNames: ["${SAFE_QA_NAMESPACE}", "safe-qa-agent-sandbox"]
+    verbs: ["get"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets"]
+    resourceNames: ["aws-node"]
+    verbs: ["get"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    resourceNames:
+      - safe-qa-agent-network-policy-boundary
+      - safe-qa-agent-namespace-boundary
+      - safe-qa-agent-pod-boundary
+      - safe-qa-immutable-images
+      - safe-qa-managed-workload-boundary
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: safe-qa-provider-readback
+subjects:
+  - kind: ServiceAccount
+    name: ${SAFE_QA_SERVICE_ACCOUNT}
+    namespace: ${SAFE_QA_NAMESPACE}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: safe-qa-provider-readback
+---
+# Suspended reference Job. Unsuspending these exact reviewed bytes is a
+# separate approved action. The selector and sole toleration target the tainted
+# EC2 NetworkPolicy sandbox node group. The ServiceAccount has no token, RBAC,
+# or IRSA identity.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: safe-qa-agent-sandbox-example
+  namespace: safe-qa-agent-sandbox
+  labels:
+    safe-qa.io/runtime: ec2-network-policy-sandbox
+    safe-qa.io/bounded-job: "true"
+spec:
+  suspend: true
+  completions: 1
+  parallelism: 1
+  backoffLimit: 0
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        safe-qa.io/runtime: ec2-network-policy-sandbox
+        safe-qa.io/isolation-subject: "true"
+        safe-qa.io/bounded-job: "true"
+    spec:
+      serviceAccountName: safe-qa-agent-sandbox
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      restartPolicy: Never
+      terminationGracePeriodSeconds: 5
+      activeDeadlineSeconds: 300
+      hostNetwork: false
+      hostPID: false
+      hostIPC: false
+      nodeSelector:
+        safe-qa.io/runtime: ec2-network-policy-sandbox
+        safe-qa.io/exclusive-node-group: "true"
+      tolerations:
+        - key: safe-qa.io/agent-sandbox
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: "${SANDBOX_IMAGE_REPOSITORY}@sha256:${SANDBOX_IMAGE_DIGEST}"
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-I", "-B", "-c"]
+          args: ["print('sandbox ready: no network or provider identity')"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+              ephemeral-storage: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+              ephemeral-storage: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            privileged: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+---
+# NetworkPolicy is additive, so the dedicated namespace must reject extra
+# policies that could restore connectivity. This requires the stable
+# ValidatingAdmissionPolicy API and fails deployment preflight if unavailable.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: safe-qa-agent-network-policy-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Exact
+    resourceRules:
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["networkpolicies"]
+    namespaceSelector:
+      matchLabels:
+        safe-qa.io/dedicated-agent-namespace: "true"
+  validations:
+    - expression: "request.operation != 'DELETE'"
+      message: "The two baseline sandbox NetworkPolicies may not be deleted."
+    - expression: "object.metadata.name in ['safe-qa-agent-default-deny', 'safe-qa-approved-egress']"
+      message: "Only the default-deny and controller-owned approved-egress policies are permitted."
+    - expression: "object.metadata.name != 'safe-qa-agent-default-deny' || oldObject == null || object.spec == oldObject.spec"
+      message: "The agent namespace default-deny policy is immutable."
+    - expression: "object.metadata.name != 'safe-qa-approved-egress' || request.userInfo.username == 'system:serviceaccount:${SAFE_QA_NAMESPACE}:${SAFE_QA_SERVICE_ACCOUNT}' || request.userInfo.groups.exists(group, group == '${NETWORK_POLICY_ADMIN_GROUP}')"
+      message: "Only the controller ServiceAccount or named break-glass group may change approved egress."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: safe-qa-agent-network-policy-boundary
+spec:
+  policyName: safe-qa-agent-network-policy-boundary
+  validationActions: ["Deny", "Audit"]
+  matchResources:
+    matchPolicy: Exact
+    namespaceSelector:
+      matchLabels:
+        safe-qa.io/dedicated-agent-namespace: "true"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: safe-qa-agent-namespace-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Exact
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["UPDATE", "DELETE"]
+        resources: ["namespaces"]
+  validations:
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation != 'DELETE'"
+      message: "The dedicated sandbox namespace may not be deleted."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['safe-qa.io/dedicated-agent-namespace'] == 'true')"
+      message: "The sandbox dedicated-agent label must remain exactly true."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['safe-qa.io/firewall-enforced'] == 'true')"
+      message: "The sandbox firewall-enforced label must remain exactly true."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['safe-qa.io/runtime'] == 'ec2-network-policy-sandbox')"
+      message: "The sandbox runtime label must remain exactly ec2-network-policy-sandbox."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['pod-security.kubernetes.io/enforce'] == 'restricted')"
+      message: "The sandbox Pod Security enforce level must remain exactly restricted."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['pod-security.kubernetes.io/enforce-version'] == 'latest')"
+      message: "The sandbox Pod Security enforce version must remain exactly latest."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['pod-security.kubernetes.io/audit'] == 'restricted')"
+      message: "The sandbox Pod Security audit level must remain exactly restricted."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['pod-security.kubernetes.io/audit-version'] == 'latest')"
+      message: "The sandbox Pod Security audit version must remain exactly latest."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['pod-security.kubernetes.io/warn'] == 'restricted')"
+      message: "The sandbox Pod Security warn level must remain exactly restricted."
+    - expression: "request.name != 'safe-qa-agent-sandbox' || request.operation == 'DELETE' || (has(object.metadata.labels) && object.metadata.labels['pod-security.kubernetes.io/warn-version'] == 'latest')"
+      message: "The sandbox Pod Security warn version must remain exactly latest."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: safe-qa-agent-namespace-boundary
+spec:
+  policyName: safe-qa-agent-namespace-boundary
+  validationActions: ["Deny", "Audit"]
+---
+# Sandbox pods remain one-shot, tokenless, non-host, and free of injected
+# configuration references. Image provenance remains a separate release gate.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: safe-qa-agent-pod-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Exact
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers"]
+    namespaceSelector:
+      matchLabels:
+        safe-qa.io/dedicated-agent-namespace: "true"
+  validations:
+    - expression: "object.metadata.labels['safe-qa.io/runtime'] == 'ec2-network-policy-sandbox' && object.spec.nodeSelector['safe-qa.io/runtime'] == 'ec2-network-policy-sandbox' && object.spec.nodeSelector['safe-qa.io/exclusive-node-group'] == 'true' && object.spec.serviceAccountName == 'safe-qa-agent-sandbox'"
+      message: "Sandbox pods must select the exclusive EC2 NetworkPolicy node group and tokenless sandbox ServiceAccount."
+    - expression: "!has(object.spec.nodeName)"
+      message: "Sandbox pods may not bypass scheduling policy with spec.nodeName."
+    - expression: "has(object.spec.tolerations) && object.spec.tolerations.size() == 1 && object.spec.tolerations.exists(toleration, toleration.key == 'safe-qa.io/agent-sandbox' && toleration.operator == 'Equal' && toleration.value == 'true' && toleration.effect == 'NoSchedule')"
+      message: "Sandbox pods must carry exactly the dedicated node-group toleration."
+    - expression: "object.spec.automountServiceAccountToken == false && object.spec.hostNetwork == false && object.spec.hostPID == false && object.spec.hostIPC == false"
+      message: "Sandbox pods may not receive a Kubernetes token or join host namespaces."
+    - expression: "has(object.spec.activeDeadlineSeconds) && object.spec.activeDeadlineSeconds <= 300 && object.spec.restartPolicy == 'Never'"
+      message: "Sandbox pods must terminate within 300 seconds and may not restart."
+    - expression: "!has(object.spec.initContainers) && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0) && object.spec.containers.size() == 1"
+      message: "Sandbox pods permit exactly one container and no init or ephemeral containers."
+    - expression: "object.spec.containers.all(container, !has(container.env) && !has(container.envFrom) && container.securityContext.readOnlyRootFilesystem == true && container.securityContext.allowPrivilegeEscalation == false && container.securityContext.privileged == false)"
+      message: "Sandbox containers may not receive injected configuration and must use the restricted security context."
+    - expression: "!has(object.spec.volumes) || object.spec.volumes.size() == 0"
+      message: "Sandbox pods may not declare any volumes."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: safe-qa-agent-pod-boundary
+spec:
+  policyName: safe-qa-agent-pod-boundary
+  validationActions: ["Deny", "Audit"]
+  matchResources:
+    matchPolicy: Exact
+    namespaceSelector:
+      matchLabels:
+        safe-qa.io/dedicated-agent-namespace: "true"
+---
+# The controller may change only the managed workload image. This policy pins
+# every other security-relevant Deployment/Pod field and prevents any second
+# NetworkPolicy from selecting the provider-managed pods.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: safe-qa-managed-workload-boundary
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Exact
+    resourceRules:
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments"]
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods", "pods/ephemeralcontainers"]
+      - apiGroups: ["networking.k8s.io"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE", "DELETE"]
+        resources: ["networkpolicies"]
+  matchConditions:
+    - name: exact-control-namespace
+      expression: "request.namespace == '${SAFE_QA_NAMESPACE}'"
+    - name: managed-resource-only
+      expression: "(request.resource.group == 'apps' && request.resource.resource == 'deployments' && request.name == 'safe-qa-managed-workload') || (request.resource.group == '' && request.resource.resource in ['pods', 'pods/ephemeralcontainers'] && ((has(object.metadata.labels) && 'safe-qa.io/provider-managed' in object.metadata.labels && object.metadata.labels['safe-qa.io/provider-managed'] == 'true') || (oldObject != null && has(oldObject.metadata.labels) && 'safe-qa.io/provider-managed' in oldObject.metadata.labels && oldObject.metadata.labels['safe-qa.io/provider-managed'] == 'true'))) || (request.resource.group == 'networking.k8s.io' && request.resource.resource == 'networkpolicies')"
+  validations:
+    - expression: "request.resource.resource != 'deployments' || (object.metadata.labels.size() == 2 && object.metadata.labels['app.kubernetes.io/name'] == 'safe-qa-managed-workload' && object.metadata.labels['safe-qa.io/provider-managed'] == 'true' && object.spec.selector.matchLabels.size() == 2 && object.spec.selector.matchLabels['app.kubernetes.io/name'] == 'safe-qa-managed-workload' && object.spec.selector.matchLabels['safe-qa.io/provider-managed'] == 'true' && !has(object.spec.selector.matchExpressions) && object.spec.template.metadata.labels.size() == 2 && object.spec.template.metadata.labels['app.kubernetes.io/name'] == 'safe-qa-managed-workload' && object.spec.template.metadata.labels['safe-qa.io/provider-managed'] == 'true')"
+      message: "The managed Deployment metadata, selector, and Pod-template labels must remain the exact provider-managed identity."
+    - expression: "request.resource.resource != 'deployments' || (object.spec.template.spec.serviceAccountName == 'safe-qa-managed-workload' && object.spec.template.spec.automountServiceAccountToken == false && object.spec.template.spec.hostNetwork == false && object.spec.template.spec.hostPID == false && object.spec.template.spec.hostIPC == false)"
+      message: "The managed Deployment must retain its tokenless ServiceAccount and may not join host namespaces."
+    - expression: "request.resource.resource != 'deployments' || (!has(object.spec.template.spec.initContainers) && (!has(object.spec.template.spec.ephemeralContainers) || object.spec.template.spec.ephemeralContainers.size() == 0) && (!has(object.spec.template.spec.volumes) || object.spec.template.spec.volumes.size() == 0) && object.spec.template.spec.containers.size() == 1 && object.spec.template.spec.containers[0].name == 'workload' && !has(object.spec.template.spec.containers[0].env) && !has(object.spec.template.spec.containers[0].envFrom) && !has(object.spec.template.spec.containers[0].volumeMounts) && !has(object.spec.template.spec.containers[0].command) && !has(object.spec.template.spec.containers[0].args))"
+      message: "The managed Deployment permits only the workload container, with no injected configuration, volumes, or entrypoint override."
+    - expression: "request.resource.resource != 'deployments' || (object.spec.template.spec.securityContext.runAsNonRoot == true && object.spec.template.spec.securityContext.seccompProfile.type == 'RuntimeDefault' && object.spec.template.spec.containers[0].securityContext.allowPrivilegeEscalation == false && object.spec.template.spec.containers[0].securityContext.privileged == false && object.spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem == true && object.spec.template.spec.containers[0].securityContext.runAsNonRoot == true && object.spec.template.spec.containers[0].securityContext.runAsUser == 65532 && object.spec.template.spec.containers[0].securityContext.runAsGroup == 65532 && object.spec.template.spec.containers[0].securityContext.capabilities.drop.size() == 1 && object.spec.template.spec.containers[0].securityContext.capabilities.drop[0] == 'ALL')"
+      message: "The managed Deployment Pod and container security contexts must remain exactly restricted."
+    - expression: "request.resource.resource != 'deployments' || (has(object.spec.template.metadata.annotations) && 'safe-qa.io/image-digest' in object.spec.template.metadata.annotations && 'safe-qa.io/source-revision' in object.spec.template.metadata.annotations && object.spec.template.metadata.annotations['safe-qa.io/image-digest'].matches('^sha256:[a-f0-9]{64}$') && object.spec.template.metadata.annotations['safe-qa.io/source-revision'].matches('^[a-f0-9]{40}$') && object.spec.template.spec.containers[0].image == '${MANAGED_IMAGE_REPOSITORY}@' + object.spec.template.metadata.annotations['safe-qa.io/image-digest'])"
+      message: "The managed Deployment must bind the exact repository to consistent immutable digest and source-revision annotations."
+    - expression: "request.resource.resource != 'deployments' || request.operation != 'UPDATE' || request.userInfo.username == 'system:serviceaccount:${SAFE_QA_NAMESPACE}:${SAFE_QA_SERVICE_ACCOUNT}' || (object.spec.replicas == oldObject.spec.replicas && object.spec.template.spec.containers[0].image == oldObject.spec.template.spec.containers[0].image && object.spec.template.metadata.annotations['safe-qa.io/image-digest'] == oldObject.spec.template.metadata.annotations['safe-qa.io/image-digest'] && object.spec.template.metadata.annotations['safe-qa.io/source-revision'] == oldObject.spec.template.metadata.annotations['safe-qa.io/source-revision'])"
+      message: "Only the exact control ServiceAccount may change managed replicas, image, source revision, or digest annotation."
+    - expression: "!(request.resource.resource in ['pods', 'pods/ephemeralcontainers']) || (object.metadata.labels['app.kubernetes.io/name'] == 'safe-qa-managed-workload' && object.metadata.labels['safe-qa.io/provider-managed'] == 'true' && object.metadata.labels.all(key, value, key in ['app.kubernetes.io/name', 'safe-qa.io/provider-managed', 'pod-template-hash']))"
+      message: "Managed Pods must retain only the provider-managed identity labels and controller hash."
+    - expression: "!(request.resource.resource in ['pods', 'pods/ephemeralcontainers']) || (object.spec.serviceAccountName == 'safe-qa-managed-workload' && object.spec.automountServiceAccountToken == false && object.spec.hostNetwork == false && object.spec.hostPID == false && object.spec.hostIPC == false)"
+      message: "Managed Pods must retain their tokenless ServiceAccount and may not join host namespaces."
+    - expression: "!(request.resource.resource in ['pods', 'pods/ephemeralcontainers']) || (!has(object.spec.initContainers) && (!has(object.spec.ephemeralContainers) || object.spec.ephemeralContainers.size() == 0) && (!has(object.spec.volumes) || object.spec.volumes.size() == 0) && object.spec.containers.size() == 1 && object.spec.containers[0].name == 'workload' && !has(object.spec.containers[0].env) && !has(object.spec.containers[0].envFrom) && !has(object.spec.containers[0].volumeMounts) && !has(object.spec.containers[0].command) && !has(object.spec.containers[0].args))"
+      message: "Managed Pods permit only the workload container, with no injected configuration, volumes, or entrypoint override."
+    - expression: "!(request.resource.resource in ['pods', 'pods/ephemeralcontainers']) || (object.spec.securityContext.runAsNonRoot == true && object.spec.securityContext.seccompProfile.type == 'RuntimeDefault' && object.spec.containers[0].securityContext.allowPrivilegeEscalation == false && object.spec.containers[0].securityContext.privileged == false && object.spec.containers[0].securityContext.readOnlyRootFilesystem == true && object.spec.containers[0].securityContext.runAsNonRoot == true && object.spec.containers[0].securityContext.runAsUser == 65532 && object.spec.containers[0].securityContext.runAsGroup == 65532 && object.spec.containers[0].securityContext.capabilities.drop.size() == 1 && object.spec.containers[0].securityContext.capabilities.drop[0] == 'ALL')"
+      message: "Managed Pod and container security contexts must remain exactly restricted."
+    - expression: "!(request.resource.resource in ['pods', 'pods/ephemeralcontainers']) || (has(object.metadata.annotations) && 'safe-qa.io/image-digest' in object.metadata.annotations && 'safe-qa.io/source-revision' in object.metadata.annotations && object.metadata.annotations['safe-qa.io/image-digest'].matches('^sha256:[a-f0-9]{64}$') && object.metadata.annotations['safe-qa.io/source-revision'].matches('^[a-f0-9]{40}$') && object.spec.containers[0].image == '${MANAGED_IMAGE_REPOSITORY}@' + object.metadata.annotations['safe-qa.io/image-digest'])"
+      message: "Managed Pods must bind the exact repository to consistent immutable digest and source-revision annotations."
+    - expression: "request.resource.resource != 'networkpolicies' || request.name in ['safe-qa-default-deny', 'safe-qa-default-deny-provider-label-absent', 'safe-qa-managed-workload-isolation', 'safe-qa-ingress', 'safe-qa-dns-egress', 'safe-qa-postgres-egress', 'safe-qa-aws-api-egress', 'safe-qa-oidc-jwks-egress', 'safe-qa-kubernetes-api-egress']"
+      message: "Only the exact reviewed control-plane NetworkPolicy objects may exist."
+    - expression: "request.resource.resource != 'networkpolicies' || request.name != 'safe-qa-managed-workload-isolation' || request.operation != 'DELETE'"
+      message: "The managed-workload isolation NetworkPolicy may not be deleted."
+    - expression: "request.resource.resource != 'networkpolicies' || request.name != 'safe-qa-managed-workload-isolation' || request.operation == 'DELETE' || (object.spec.podSelector.matchLabels.size() == 2 && object.spec.podSelector.matchLabels['app.kubernetes.io/name'] == 'safe-qa-managed-workload' && object.spec.podSelector.matchLabels['safe-qa.io/provider-managed'] == 'true' && !has(object.spec.podSelector.matchExpressions) && object.spec.policyTypes.size() == 2 && object.spec.policyTypes.exists(type, type == 'Ingress') && object.spec.policyTypes.exists(type, type == 'Egress') && has(object.spec.ingress) && object.spec.ingress.size() == 0 && has(object.spec.egress) && object.spec.egress.size() == 0)"
+      message: "The managed-workload isolation policy must retain its exact selector and empty ingress and egress."
+    - expression: "request.resource.resource != 'networkpolicies' || request.name != 'safe-qa-default-deny' || request.operation == 'DELETE' || (object.spec.podSelector.matchExpressions.size() == 1 && object.spec.podSelector.matchExpressions[0].key == 'safe-qa.io/provider-managed' && object.spec.podSelector.matchExpressions[0].operator == 'NotIn' && object.spec.podSelector.matchExpressions[0].values.size() == 1 && object.spec.podSelector.matchExpressions[0].values[0] == 'true' && !has(object.spec.podSelector.matchLabels))"
+      message: "The default-deny selector must exclude only the exact provider-managed target."
+    - expression: "request.resource.resource != 'networkpolicies' || request.name != 'safe-qa-default-deny-provider-label-absent' || request.operation == 'DELETE' || (object.spec.podSelector.matchExpressions.size() == 1 && object.spec.podSelector.matchExpressions[0].key == 'safe-qa.io/provider-managed' && object.spec.podSelector.matchExpressions[0].operator == 'DoesNotExist' && !has(object.spec.podSelector.matchExpressions[0].values) && !has(object.spec.podSelector.matchLabels))"
+      message: "The label-absent default-deny selector must remain exact."
+    - expression: "request.resource.resource != 'networkpolicies' || request.operation == 'DELETE' || request.name in ['safe-qa-default-deny', 'safe-qa-default-deny-provider-label-absent', 'safe-qa-managed-workload-isolation'] || (object.spec.podSelector.matchLabels.size() == 1 && object.spec.podSelector.matchLabels['app.kubernetes.io/name'] == 'safe-qa-service' && !has(object.spec.podSelector.matchExpressions))"
+      message: "Every non-managed control-plane policy must retain the exact safe-qa-service selector."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: safe-qa-managed-workload-boundary
+spec:
+  policyName: safe-qa-managed-workload-boundary
+  validationActions: ["Deny", "Audit"]
+  matchResources:
+    matchPolicy: Exact
+---
+# Admission also rejects mutable image references in the control-plane
+# namespace, independently of the deployment template.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: safe-qa-immutable-images
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    matchPolicy: Exact
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+    namespaceSelector:
+      matchLabels:
+        safe-qa.io/firewall-enforced: "true"
+  validations:
+    - expression: "object.spec.containers.all(container, container.image.matches('^[^@]+@sha256:[a-f0-9]{64}$'))"
+      message: "Every container image must use repository@sha256:<64 lowercase hex>."
+    - expression: "!has(object.spec.initContainers) || object.spec.initContainers.all(container, container.image.matches('^[^@]+@sha256:[a-f0-9]{64}$'))"
+      message: "Every init-container image must use repository@sha256:<64 lowercase hex>."
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: safe-qa-immutable-images
+spec:
+  policyName: safe-qa-immutable-images
+  validationActions: ["Deny", "Audit"]
+  matchResources:
+    matchPolicy: Exact
+    namespaceSelector:
+      matchLabels:
+        safe-qa.io/firewall-enforced: "true"

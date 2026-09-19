@@ -1,0 +1,11 @@
+*
+!.dockerignore
+!Dockerfile
+!README.md
+!build-requirements.lock
+!requirements.lock
+!pyproject.toml
+!src/
+!src/**
+!db/
+!db/**
