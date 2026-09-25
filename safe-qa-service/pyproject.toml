@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools==84.0.0", "wheel==0.47.0"]
+requires = ["setuptools==84.0.0", "wheel==0.48.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,14 +9,14 @@ description = "Fail-closed evidence intake and audit service; never a clinical o
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-  "boto3==1.43.68",
+  "boto3==1.43.98",
   "fastapi==0.141.1",
   "kubernetes==36.0.3",
-  "pydantic==2.11.7",
-  "psycopg[binary]==3.2.9",
-  "PyJWT[crypto]==2.13.0",
+  "pydantic==2.13.5",
+  "psycopg[binary]==3.3.5",
+  "PyJWT[crypto]==2.14.0",
   "starlette==1.6.0",
-  "uvicorn[standard]==0.35.0",
+  "uvicorn[standard]==0.53.0",
 ]
 
 [project.scripts]
@@ -25,9 +25,9 @@ safe-qa-approval = "safe_qa_service.approval_cli:main"
 [project.optional-dependencies]
 test = [
   "httpx==0.28.1",
-  "pytest==9.0.3",
+  "pytest==9.1.1",
   "pytest-cov==6.2.1",
-  "ruff==0.12.5",
+  "ruff==0.16.8",
 ]
 
 [tool.setuptools]
