@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
   merge_group:
+  # Lets dependabot-lock-sync.yml run source-contract on the head it commits;
+  # commits made with GITHUB_TOKEN do not start pull_request runs unapproved.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -60,7 +63,7 @@ jobs:
           python -m venv .local-ci/audit
           .local-ci/audit/bin/python -m pip install --require-hashes --only-binary=:all: -r .github/audit-requirements.lock
           .local-ci/audit/bin/python -m pip check
-          for lock in safe-qa-service/requirements.lock safe-qa-service/build-requirements.lock .github/test-requirements.lock requirements-publish.lock .github/audit-requirements.lock; do
+          for lock in safe-qa-service/requirements.lock safe-qa-service/build-requirements.lock .github/test-requirements.lock requirements-publish.lock .github/audit-requirements.lock .github/lock-tool-requirements.lock; do
             .local-ci/audit/bin/python -m pip_audit --require-hashes --disable-pip --progress-spinner off --strict -r "$lock"
           done
       - name: Install locked runtime, build and test dependencies
