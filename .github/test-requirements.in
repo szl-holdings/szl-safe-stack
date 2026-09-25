@@ -3,5 +3,5 @@
 -c ../safe-qa-service/build-requirements.lock
 httpx==0.28.1
 pytest==9.1.1
-pytest-cov==6.2.1
+pytest-cov==7.1.0
 ruff==0.16.8
