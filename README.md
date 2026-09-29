@@ -126,7 +126,13 @@ with `python -m pip install --require-hashes --only-binary=:all: -r requirements
 then run `python -m pip check` before invoking it. The
 tool never creates a target, manufactures credentials, or retries an uncertain
 write. Read the generated receipt to distinguish prepared source from observed
-publication.
+publication. The committed writer is the dispatch-only workflow
+[`hf-space.yml`](.github/workflows/hf-space.yml): it runs the same publisher on
+`main` with the hash-locked SDK and the per-asset lock
+`hf-write/space/SZLHOLDINGS/szl-safe-stack`, takes the observed Space commit as
+its `expected_parent` input, and needs the repository secrets `HF_TOKEN` and
+`BRANCH_PROTECTION_READ_TOKEN` (Administration: read, for the branch-protection
+check).
 
 The [production runbook](safe-qa-service/docs/AWS_PRODUCTION_RUNBOOK.md) requires
 actual AWS/EKS targets, organizational OIDC, separately controlled signing keys,
