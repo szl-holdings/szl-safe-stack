@@ -19,6 +19,7 @@ dependencies = [
   "starlette==1.6.0",
   "uvicorn[standard]==0.53.0",
 ]
+classifiers = ["Private :: Do Not Upload"]
 
 [project.scripts]
 safe-qa-approval = "safe_qa_service.approval_cli:main"
