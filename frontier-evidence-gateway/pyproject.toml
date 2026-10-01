@@ -4,3 +4,4 @@ version = "0.2.1"
 description = "Local-first, fail-closed software evidence gateway"
 requires-python = ">=3.11"
 dependencies = []
+classifiers = ["Private :: Do Not Upload"]
