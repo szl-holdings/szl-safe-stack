@@ -178,6 +178,59 @@ jobs:
           assert result["model_observation"] is None
           print("Both authenticated service contracts passed; gateway provider calls disabled.")
           PY
+      - name: Verify idle Gateway PID 1 shutdown and receipt retention
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          import time
+          import urllib.error
+          import urllib.request
+
+          def docker(*args):
+              return subprocess.check_output(["docker", *args], text=True, timeout=30).strip()
+
+          opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+          def ledger():
+              request = urllib.request.Request("http://127.0.0.1:8787/health/ready", headers={
+                  "Authorization": "Bearer " + os.environ["SZL_GATEWAY_BEARER_TOKEN"],
+              })
+              with opener.open(request, timeout=3) as response:
+                  result = json.load(response)
+              assert result["status"] == "READY" and result["ledger"]["status"] == "VERIFIED"
+              return result["ledger"]
+
+          container = docker("compose", "ps", "-q", "gateway")
+          assert container and "\n" not in container
+          before = json.loads(docker("inspect", container))[0]
+          assert before["Config"]["Labels"]["com.docker.compose.project"] == os.environ["COMPOSE_PROJECT_NAME"]
+          assert before["Config"]["Labels"]["com.docker.compose.service"] == "gateway"
+          assert before["State"]["Running"] and before["State"]["Health"]["Status"] == "healthy"
+          assert before["Config"].get("StopSignal") in (None, "", "SIGTERM", "15")
+          assert before["Path"] == "python" and before["Args"] == ["-m", "frontier_gateway", "serve"]
+          proof = ledger()
+          # No timeout-driven SIGKILL: a stuck stop fails this disposable CI run.
+          # A CLI timeout does not cancel the daemon stop; normal CI cleanup still applies.
+          docker("stop", "--timeout", "-1", container)
+          stopped = json.loads(docker("inspect", container))[0]
+          assert not stopped["State"]["Running"] and stopped["State"]["ExitCode"] == 0
+          assert not stopped["State"]["OOMKilled"]
+          docker("start", container)
+          deadline = time.monotonic() + 30
+          while True:
+              try:
+                  assert ledger() == proof, "Gateway receipt history changed across shutdown"
+                  break
+              except (urllib.error.URLError, TimeoutError):
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(0.2)
+          restarted = json.loads(docker("inspect", container))[0]
+          assert restarted["Image"] == before["Image"] and restarted["Id"] == before["Id"]
+          assert sorted(restarted["Mounts"], key=lambda m: m["Destination"]) == sorted(before["Mounts"], key=lambda m: m["Destination"])
+          print("Idle Gateway PID 1 exited zero on SIGTERM; exact container and verified receipt head retained.")
+          PY
       - name: Remove this run's disposable local stack
         if: always()
         env:

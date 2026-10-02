@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hmac
 import json
+import signal
+import socket
+import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Mapping
@@ -15,6 +18,61 @@ from .schemas import EvidenceRequest, SchemaError
 
 class _DuplicateHeader(ValueError):
     pass
+
+
+class _DrainingHTTPServer(ThreadingHTTPServer):
+    # ThreadingHTTPServer otherwise abandons daemon workers at process exit.
+    daemon_threads = False
+    block_on_close = True
+    socket_timeout = 5.0
+
+    def __init__(
+        self, address: tuple[str, int], handler: type[BaseHTTPRequestHandler]
+    ) -> None:
+        self.stop_requested = False
+        self._request_lock = threading.Lock()
+        # False: reading/framing input; True: admitted through response delivery.
+        self._requests: dict[socket.socket, bool] = {}
+        super().__init__(address, handler)
+
+    def get_request(self) -> tuple[socket.socket, tuple[str, int]]:
+        request, address = super().get_request()
+        request.settimeout(self.socket_timeout)
+        with self._request_lock:
+            if self.stop_requested:
+                request.close()
+                raise OSError("gateway is stopping")
+            self._requests[request] = False
+        return request, address
+
+    def begin_dispatch(self, request: socket.socket) -> bool:
+        with self._request_lock:
+            if self.stop_requested or request not in self._requests:
+                return False
+            self._requests[request] = True
+            return True
+
+    def shutdown_request(self, request: socket.socket) -> None:
+        try:
+            super().shutdown_request(request)
+        finally:
+            with self._request_lock:
+                self._requests.pop(request, None)
+
+    def begin_shutdown(self) -> None:
+        self.stop_requested = True
+        # Closing the listener does not close any accepted connections.
+        self.socket.close()
+        with self._request_lock:
+            reading = [request for request, admitted in self._requests.items() if not admitted]
+        for request in reading:
+            try:
+                # Wake incomplete/trickling headers or bodies without disrupting
+                # application work already admitted under the same lock.
+                request.shutdown(socket.SHUT_RD)
+            except OSError:
+                # A worker may already have finished and closed this socket.
+                pass
 
 
 def _single_header(headers: Mapping[str, str], name: str) -> str | None:
@@ -171,6 +229,11 @@ def _handler(service: GatewayService) -> type[BaseHTTPRequestHandler]:
             return bool(self.headers.get_all("Transfer-Encoding"))
 
         def _dispatch(self, body: bytes) -> None:
+            if isinstance(self.server, _DrainingHTTPServer) and not self.server.begin_dispatch(
+                self.connection
+            ):
+                self._write(503, GatewayService._error("GATEWAY_STOPPING"))
+                return
             # HTTPMessage.items() preserves duplicate fields, which lets the
             # service reject duplicate Authorization and Content-Type headers.
             status, payload = service.handle(self.command, self.path, self.headers, body)  # type: ignore[arg-type]
@@ -196,8 +259,31 @@ def _handler(service: GatewayService) -> type[BaseHTTPRequestHandler]:
 
 def serve(service: GatewayService) -> None:
     service.ledger.verify()
-    server = ThreadingHTTPServer((service.config.bind, service.config.port), _handler(service))
+    server = _DrainingHTTPServer((service.config.bind, service.config.port), _handler(service))
+    server.timeout = 0.2
+    previous_handlers = {}
+
+    def request_stop(_signum: int, _frame: object) -> None:
+        # Python runs this on the main thread, possibly between any two
+        # instructions. Do not raise, acquire locks, or join workers here.
+        server.stop_requested = True
+
     try:
-        server.serve_forever(poll_interval=0.5)
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous_handlers[signum] = signal.signal(signum, request_stop)
+        while not server.stop_requested:
+            server.handle_request()
     finally:
-        server.server_close()
+        try:
+            try:
+                server.begin_shutdown()
+            finally:
+                # Non-daemon workers retain ownership through ledger commit and
+                # response delivery. Socket inactivity is bounded, but an active
+                # provider's total execution time is not a shutdown deadline.
+                server.server_close()
+        finally:
+            # Keep the harmless handlers installed throughout draining so that
+            # repeated termination signals cannot interrupt committed work.
+            for signum, previous in previous_handlers.items():
+                signal.signal(signum, previous)
