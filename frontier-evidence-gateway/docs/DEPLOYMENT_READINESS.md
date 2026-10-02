@@ -40,6 +40,32 @@ Before any paid-provider production claim, place the service behind an authentic
 
 ## Verification commands
 
+### Process shutdown contract
+
+The Gateway handles SIGTERM and SIGINT explicitly when `serve` runs in the main
+thread, including when Python is container PID 1. A stop request closes admission
+to new evaluations. Connections still sending headers or a body are interrupted;
+they must not become new provider calls or ledger writes during shutdown.
+Already-admitted service work is joined before the process returns normally.
+Repeated stop signals do not interrupt that drain. Ledger verification still
+fails closed at startup, and no shutdown operation erases or initializes history.
+
+Accepted sockets have a five-second I/O inactivity timeout. This is a
+graceful-drain contract, not a hard total-duration guarantee. A stalled provider
+or filesystem can keep an admitted request pending. Socket inactivity timeouts
+do not prove an end-to-end deadline. Operators must monitor shutdown and
+must not label timeout-driven SIGKILL as a successful graceful stop. Do not reduce
+supervisor grace periods to hide stalled work. The exact container and preserved
+receipt history must be checked again after restarting.
+
+The lifecycle unit tests cover active work and incomplete requests; real POSIX
+signal tests run on Linux. Windows process termination is not equivalent to Unix
+signal delivery. Root CI separately checks idle container PID-1 SIGTERM exit code
+zero and receipt retention on its disposable stack. That CI observation is not
+proof that a production request, external provider, or host survived shutdown.
+
+### Run the checks
+
 ```powershell
 python -m unittest discover -s tests -v
 python -m frontier_gateway self-check
