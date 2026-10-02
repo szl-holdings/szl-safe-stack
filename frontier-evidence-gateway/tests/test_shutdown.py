@@ -125,7 +125,7 @@ class TransportShutdownTests(unittest.TestCase):
         def accept_one():
             try:
                 server.handle_request()
-            except BaseException as exc:
+            except Exception as exc:
                 accept_errors.append(exc)
         accept_thread = threading.Thread(target=accept_one, daemon=True)
         accept_thread.start()
@@ -151,7 +151,7 @@ class TransportShutdownTests(unittest.TestCase):
         def close():
             try:
                 server.server_close()
-            except BaseException as exc:
+            except Exception as exc:
                 errors.append(exc)
             finally:
                 done.set()

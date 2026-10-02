@@ -222,7 +222,11 @@ jobs:
               try:
                   assert ledger() == proof, "Gateway receipt history changed across shutdown"
                   break
-              except (urllib.error.URLError, TimeoutError):
+              except urllib.error.HTTPError:
+                  # An HTTP response is evidence, not a startup transport race.
+                  # In particular, never retry away auth or ledger failures.
+                  raise
+              except (urllib.error.URLError, ConnectionError, TimeoutError):
                   if time.monotonic() >= deadline:
                       raise
                   time.sleep(0.2)
