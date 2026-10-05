@@ -73,15 +73,18 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\pytest.exe -m "not integration" --cov=safe_qa_service --cov-report=term-missing
 ```
 
-To initialize all three database migrations and run the PostgreSQL tests:
+PostgreSQL integration tests **drop and recreate audit and control tables**. Run them
+only against a separately provisioned disposable test database containing no evidence to
+retain. Never point `TEST_DATABASE_URL` at the normal Compose database, a service's
+evidence volume, or a production database.
 
-```powershell
-docker compose up -d postgres
-$env:TEST_DATABASE_URL='postgresql://safeqa:local-development-only@127.0.0.1:5432/safeqa'
-.\.venv\Scripts\pytest.exe -m integration
-```
+Initialize all three migrations in that disposable database, explicitly set
+`TEST_DATABASE_URL` to its connection URL, and verify the target before running
+`.\.venv\Scripts\pytest.exe -m integration`. The isolated PostgreSQL service and migration
+setup in the [root CI workflow](../.github/workflows/ci.yml) provide the reference.
+If a disposable database is unavailable, run only the non-integration suite above.
 
-Compose mounts `001_audit_ledger.sql`, `002_control_plane.sql`, and
+For the local service, Compose mounts `001_audit_ledger.sql`, `002_control_plane.sql`, and
 `003_durable_evidence_outbox.sql` into a new local PostgreSQL volume.
 Migration `003` adds durable, retryable secondary-ledger export state; it does not replace the
 primary append-only control-event receipts created by migration `002`.
