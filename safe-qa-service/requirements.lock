@@ -147,9 +147,9 @@ attrs==26.1.0 \
     --hash=sha256:c647aa4a12dfbad9333ca4e71fe62ddc36f4e63b2d260a37a8b83d2f043ac309 \
     --hash=sha256:d03ceb89cb322a8fd706d4fb91940737b6642aa36998fe130a9bc96c985eff32
     # via aiohttp
-boto3==1.43.105 \
-    --hash=sha256:b8b6236ae7fe2724eee608c9b0649afbb86f0ec98158f39f67e64e678ec47499 \
-    --hash=sha256:e51260aed9cc1474778b5488bc6f97ad28f27a0a7002f4bbaaf8191aff1422ea
+boto3==1.43.108 \
+    --hash=sha256:03341f089158368acf83e921aca98b706095322ca52bc4c039a616940aa5ad41 \
+    --hash=sha256:19e9da95ef0c494e27052049a42137550e66730509bb613e76eaa30ddf9a7170
     # via safe-qa-service (safe-qa-service/pyproject.toml)
 botocore==1.43.108 \
     --hash=sha256:ab9d16c6b4350aaa54ed28202dfa2998b2d735fdbf3247eb60af469d8d48a5b8 \
@@ -420,9 +420,9 @@ durationpy==0.10 \
     --hash=sha256:1fa6893409a6e739c9c72334fc65cca1f355dbdd93405d30f726deb5bde42fba \
     --hash=sha256:3b41e1b601234296b4fb368338fdcd3e13e0b4fb5b67345948f4f2bf9868b286
     # via kubernetes
-fastapi==0.141.1 \
-    --hash=sha256:bfb91aa2d334c61cb35ba9a116fc123b3d3df31640b801cf57a7a78ec3f603b3 \
-    --hash=sha256:e8822fc40db1e1858054d7a949a888695bc9bdce70139178e33bd2871a453ca1
+fastapi==0.142.2 \
+    --hash=sha256:06366626f2e70576367714d9ab2fe8472e6c8456dba69b399f9f797ab5e92570 \
+    --hash=sha256:bd5f4d81f1e93a88bcd77caf4dfe3c2dbffc3805407a0007e9a114c18b3a670b
     # via safe-qa-service (safe-qa-service/pyproject.toml)
 frozenlist==1.8.0 \
     --hash=sha256:0325024fe97f94c41c08872db482cf8ac4800d80e79222c6b0b7b162d5b13686 \
@@ -787,6 +787,10 @@ oauthlib==4.0.0 \
     # via
     #   safe-qa-service (safe-qa-service/pyproject.toml)
     #   requests-oauthlib
+opentelemetry-api==1.45.1 \
+    --hash=sha256:aa38ed19bcc084ba42782a73255b3582283eced7ad6dddbd6695189e69adfb75 \
+    --hash=sha256:b31553efa588ae44bc306f863c785c5333a9ecc091248c6ee68b4b6c87fdedfb
+    # via fastapi
 propcache==0.5.2 \
     --hash=sha256:01c4fc7480cd0598bb4b57022df55b9ca296da7fc5a8760bd8451a7e63a7d427 \
     --hash=sha256:04dc2390d9edbbaef7461f33322555976ffddf0b650a038649d026358714e6c5 \
@@ -1241,6 +1245,7 @@ typing-extensions==4.16.0 \
     #   aiosignal
     #   anyio
     #   fastapi
+    #   opentelemetry-api
     #   psycopg
     #   pydantic
     #   pydantic-core
