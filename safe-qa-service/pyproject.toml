@@ -9,8 +9,8 @@ description = "Fail-closed evidence intake and audit service; never a clinical o
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-  "boto3==1.43.105",
-  "fastapi==0.141.1",
+  "boto3==1.43.108",
+  "fastapi==0.142.2",
   "kubernetes==36.0.3",
   "oauthlib==4.0.0",
   "pydantic==2.13.5",
@@ -29,7 +29,7 @@ test = [
   "httpx==0.28.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.16.9",
+  "ruff==0.16.10",
 ]
 
 [tool.setuptools]
