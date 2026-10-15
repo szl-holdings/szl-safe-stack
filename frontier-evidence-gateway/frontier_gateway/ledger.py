@@ -839,8 +839,11 @@ def isolated_restore_measurement(
         try:
             directory.cleanup()
         except OSError:
-            pass
-        cleaned = not Path(directory.name).exists()
+            # A cleanup error cannot attest that every temporary copy was removed.
+            # Keep the local measurement fail-closed without exposing its path.
+            cleaned = False
+        else:
+            cleaned = not Path(directory.name).exists()
     if measurement is None:
         return _refused_restore("isolated restore did not produce a measurement")
     measurement["restore_target"]["cleaned_up"] = cleaned

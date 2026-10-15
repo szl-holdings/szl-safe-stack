@@ -6,18 +6,14 @@ import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 import frontier_gateway.ledger as ledger_module
-from frontier_gateway.ledger import (
-    ReceiptLedger,
-    isolated_restore_measurement,
-    validate_restore_measurement,
-)
 
 
 def _quiescent_ledger(directory: Path, *, receipts: int) -> Path:
     database = directory / "receipts.sqlite3"
-    ledger = ReceiptLedger(database)
+    ledger = ledger_module.ReceiptLedger(database)
     for index in range(receipts):
         ledger.append({"schema_version": "szl.frontier.receipt_event.v1", "n": index})
     connection = sqlite3.connect(database)
@@ -37,7 +33,7 @@ class IsolatedRestoreTests(unittest.TestCase):
             recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
             started = recovery + timedelta(seconds=5)
             completed = started + timedelta(seconds=3)
-            result = isolated_restore_measurement(
+            result = ledger_module.isolated_restore_measurement(
                 source,
                 recovery_point_at=recovery,
                 started_at=started,
@@ -49,7 +45,7 @@ class IsolatedRestoreTests(unittest.TestCase):
             self.assertEqual(result["postgresql_ledger"], "NOT_APPLICABLE")
             self.assertEqual(result["measurement_verdict"], "PASS", result["measurement_detail"])
             measurement = result["measurement"]
-            self.assertEqual(validate_restore_measurement(measurement), (
+            self.assertEqual(ledger_module.validate_restore_measurement(measurement), (
                 "PASS",
                 "isolated restore run_id=restore-gateway-synthetic rto_seconds=3.0 rpo_seconds=5.0",
             ))
@@ -92,12 +88,48 @@ class IsolatedRestoreTests(unittest.TestCase):
                 hashlib.sha256(Path(ledger_module.__file__).read_bytes()).hexdigest(),
             )
 
+    def test_cleanup_failure_cannot_produce_a_passing_restore(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = _quiescent_ledger(root, receipts=1)
+            source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+            recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
+            # Own and clean the fake restore directory after simulating the
+            # operating system refusing the measurement's cleanup attempt.
+            with tempfile.TemporaryDirectory(dir=root) as restore_root:
+                class FailedCleanupDirectory:
+                    name = restore_root
+
+                    def cleanup(self) -> None:
+                        raise OSError("simulated cleanup failure")
+
+                with patch.object(
+                    ledger_module.tempfile,
+                    "TemporaryDirectory",
+                    return_value=FailedCleanupDirectory(),
+                ):
+                    result = ledger_module.isolated_restore_measurement(
+                        source,
+                        recovery_point_at=recovery,
+                        started_at=recovery + timedelta(seconds=1),
+                        clock=lambda: recovery + timedelta(seconds=2),
+                    )
+                self.assertTrue((Path(restore_root) / "restored.sqlite3").exists())
+                self.assertEqual(result["measurement_verdict"], "FAIL")
+                self.assertEqual(result["measurement"]["status"], "FAIL")
+                self.assertFalse(result["measurement"]["restore_target"]["cleaned_up"])
+                self.assertFalse(result["production_approval"])
+                self.assertIsNone(result["signature"])
+                self.assertNotIn(restore_root, str(result))
+                self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), source_hash)
+            self.assertFalse(Path(restore_root).exists())
+
     def test_rto_tamper_and_extra_key_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             source = _quiescent_ledger(Path(directory), receipts=1)
             recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
             started = recovery + timedelta(seconds=5)
-            result = isolated_restore_measurement(
+            result = ledger_module.isolated_restore_measurement(
                 source,
                 recovery_point_at=recovery,
                 started_at=started,
@@ -107,12 +139,12 @@ class IsolatedRestoreTests(unittest.TestCase):
         self.assertEqual(result["measurement_verdict"], "PASS")
         tampered = dict(measurement)
         tampered["rto_seconds"] = 0
-        verdict, detail = validate_restore_measurement(tampered)
+        verdict, detail = ledger_module.validate_restore_measurement(tampered)
         self.assertEqual(verdict, "FAIL")
         self.assertIn("RTO", detail)
         tampered = dict(measurement)
         tampered["production_approval"] = True
-        verdict, detail = validate_restore_measurement(tampered)
+        verdict, detail = ledger_module.validate_restore_measurement(tampered)
         self.assertEqual(verdict, "FAIL")
         self.assertIn("shape", detail)
 
@@ -124,7 +156,7 @@ class IsolatedRestoreTests(unittest.TestCase):
                 path.write_bytes(b"")
             recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
             started = recovery + timedelta(seconds=4)
-            result = isolated_restore_measurement(
+            result = ledger_module.isolated_restore_measurement(
                 source,
                 recovery_point_at=recovery,
                 started_at=started,
@@ -143,7 +175,7 @@ class IsolatedRestoreTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             source = _quiescent_ledger(Path(directory), receipts=0)
             recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
-            result = isolated_restore_measurement(
+            result = ledger_module.isolated_restore_measurement(
                 source,
                 recovery_point_at=recovery,
                 started_at=recovery + timedelta(seconds=1),
@@ -162,7 +194,7 @@ class IsolatedRestoreTests(unittest.TestCase):
             wal.write_bytes(b"live-wal-frame")
             before = wal.read_bytes()
             recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
-            result = isolated_restore_measurement(
+            result = ledger_module.isolated_restore_measurement(
                 source,
                 recovery_point_at=recovery,
                 started_at=recovery + timedelta(seconds=1),
@@ -183,7 +215,7 @@ class IsolatedRestoreTests(unittest.TestCase):
         )
         script_hash = hashlib.sha256(script.read_bytes()).hexdigest()
         recovery = datetime(2026, 10, 9, 16, 0, tzinfo=timezone.utc)
-        refused = isolated_restore_measurement(
+        refused = ledger_module.isolated_restore_measurement(
             script,
             recovery_point_at=recovery,
             started_at=recovery + timedelta(seconds=1),
