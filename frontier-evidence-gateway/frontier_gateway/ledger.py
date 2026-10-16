@@ -525,6 +525,17 @@ def validate_restore_measurement(value: Any) -> tuple[str, str]:
     )
 
 
+def _read_restore_bytes(path: Path) -> bytes:
+    # Bound allocation before reading, including when a file grows after an
+    # earlier attestation. The extra byte distinguishes the exact limit from
+    # an oversized input without trusting a potentially stale stat result.
+    with path.open("rb") as stream:
+        data = stream.read(MAX_RESTORE_SOURCE_BYTES + 1)
+    if len(data) > MAX_RESTORE_SOURCE_BYTES:
+        raise LedgerError("restore source exceeds the byte limit")
+    return data
+
+
 def _attest_file(path: Path) -> dict[str, object]:
     if path.is_symlink():
         raise LedgerError("restore attestation refuses a symlink")
@@ -539,13 +550,11 @@ def _attest_file(path: Path) -> dict[str, object]:
         }
     if not path.is_file():
         raise LedgerError("restore attestation expected a regular file")
-    data = path.read_bytes()
+    data = _read_restore_bytes(path)
     stat = path.stat()
     mtime_ns = stat.st_mtime_ns
     if not isinstance(mtime_ns, int) or stat.st_size != len(data):
         raise LedgerError("restore attestation observed an unstable file")
-    if len(data) > MAX_RESTORE_SOURCE_BYTES:
-        raise LedgerError("restore source exceeds the byte limit")
     return {
         "exists": True,
         "sha256": hashlib.sha256(data).hexdigest(),
@@ -709,7 +718,10 @@ def isolated_restore_measurement(
             return _refused_restore(
                 f"source sidecar {suffix} is non-empty; checkpoint and close it before restore"
             )
-    source_bytes = source.read_bytes()
+    try:
+        source_bytes = _read_restore_bytes(source)
+    except (OSError, LedgerError) as exc:
+        return _refused_restore(f"restore source could not be reread: {exc}")
     if hashlib.sha256(source_bytes).hexdigest() != before["sha256"]:
         return _refused_restore("restore source changed while it was being read")
     completion_clock = clock if clock is not None else lambda: datetime.now(timezone.utc)
