@@ -1,3 +1,3 @@
 # Lock-regeneration tooling for tools/sync_locks.py; never installed into the runtime.
 packaging==26.3
-uv==0.12.19
+uv==0.13.4
