@@ -1,2 +1,5 @@
 # Isolated vulnerability auditor; never installed into the application runtime.
 pip-audit==2.10.1
+# Floors recorded by source-contract pip-audit.
+certifi==2026.10.19
+filelock==4.2.1
