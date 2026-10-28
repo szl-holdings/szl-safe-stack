@@ -537,7 +537,7 @@ class NoEffectTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 for node in ast.walk(tree):
                     if isinstance(node, ast.Import):
-                        self.assertTrue({alias.name for alias in node.names} <= self._ALLOWED_IMPORTS)
+                        self.assertLessEqual({alias.name for alias in node.names}, self._ALLOWED_IMPORTS)
                     elif isinstance(node, ast.ImportFrom):
                         if node.level == 0:
                             self.assertIn(node.module, self._ALLOWED_IMPORTS)
