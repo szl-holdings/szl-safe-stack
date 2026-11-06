@@ -4,6 +4,11 @@ This register distinguishes observed execution from authored controls. The machi
 record is `evidence/verification-report.json`; if that file and this summary diverge, preserve both
 and refresh them from newly executed commands rather than rewriting history.
 
+In the consolidated `szl-holdings/szl-safe-stack` repository, `evidence/` is ignored by Git
+(`.gitignore`) and excluded from the source archive (`tools/publish_hf_source.py`), so that report
+and the `evidence/implementation-manifest.sha256` cited below are not tracked here. The dated
+observations in this register are preserved as text; they are not backed by files in this tree.
+
 Evidence states:
 
 - `OBSERVED_PASS`: the named command ran in this workspace and returned the recorded successful
@@ -99,13 +104,13 @@ hosted CI, managed-database configuration, or deployment.
 | Packaging | dependency consistency, compilation, Ruff, coverage gate, wheel, manifest/archive digests |
 | Container | image build, non-root/read-only smoke, health behavior, SBOM and vulnerability scan at exact digest |
 | Kubernetes/Terraform | formatting/validation, no placeholders, server dry-run, admission results, exact live readback |
-| Hosted CI | NOT_RUN; requires a protected run URL and conclusion at the exact commit with reviewed action/container digests |
+| Hosted CI | a protected run URL and conclusion at the exact commit with reviewed action/container digests; observed for `7ea4577` on 2026-11-06 (below) and required again for every later commit |
 
 ## Production evidence status
 
 | Claim | State | What would change it |
 |---|---|---|
-| Hosted CI | NOT_RUN | protected provider run and exact-revision readback |
+| Hosted CI | OBSERVED_PASS for `7ea4577` only (2026-11-06, below) | protected provider run and exact-revision readback for each later revision |
 | Overall production deployment | NOT_DEPLOYED | exact live workload and complete production readback |
 | AWS infrastructure configured | NOT_PERFORMED | successful governed apply plus exact AWS readback |
 | EKS workload deployed | NOT_DEPLOYED | immutable image rollout and ready/live identity readback |
@@ -184,3 +189,24 @@ PostgreSQL integration and Compose API smoke were not repeated for this final in
 change. Their successful observations in the preceding section apply to the source before this
 correction. No database schema, SQL persistence behavior, provider adapter, or deployment setting
 changed in this correction, and no external provider was called.
+
+## Observed hosted CI and local re-run -- 2026-11-06
+
+Recorded by an automated audit session from GitHub REST readback and commands that session executed.
+Source revision: `7ea4577a31fcbc27d774a64ca4e1bb5c2f01076a` on `main`.
+
+| Check | Observed result | State |
+|---|---|---|
+| Branch protection readback | `GET /repos/szl-holdings/szl-safe-stack/branches/main` reported `protected: true` and required check `source-contract` from app `15368` (GitHub Actions), enforcement `everyone`; the full protection document needs Administration read and returned HTTP `403` to that session | OBSERVED_PASS (partial readback) |
+| Hosted `source-contract` | [run 42212006464](https://github.com/szl-holdings/szl-safe-stack/actions/runs/42212006464), `push` of the revision above, attempt 1: job `source-contract` and every step `success` | OBSERVED_PASS |
+| Local hash-locked install | CPython 3.13.18, Linux x86_64: runtime, build and test locks installed with `--require-hashes --only-binary=:all:`; `pip check` reported `No broken requirements found.` | OBSERVED_PASS |
+| Local Ruff | `All checks passed!` | OBSERVED_PASS |
+| Local full suite | migrations 001/002/003 applied to a disposable PostgreSQL 16.15 cluster (not a Compose volume), then `196 passed` with both PostgreSQL integration tests executed; total coverage `84.91%` against the `80%` floor | OBSERVED_PASS |
+| Local pip-audit | the CI auditor lock in a separate CPython 3.12.13 environment reported `No known vulnerabilities found` for each of the six locks | OBSERVED_PASS (point in time) |
+| Local container build and Compose API smoke | no Docker daemon was available in that environment | NOT_RUN |
+
+For the two hosted rows, `OBSERVED_PASS` means a provider record read back through the GitHub API,
+not a command run in this workspace. The hosted run is evidence for that exact revision only. The
+local results are engineering observations on one machine. Neither establishes hosted evidence for
+a later commit, a deployed workload, AWS enforcement, human approval, witnessing, or any clinical or
+biological claim; the production states listed above are otherwise unchanged.
