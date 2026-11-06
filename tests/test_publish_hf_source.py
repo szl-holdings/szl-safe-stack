@@ -119,6 +119,16 @@ class SourceBundleTests(unittest.TestCase):
         with tarfile.open(fileobj=io.BytesIO(gzip.decompress(compressed))) as archive:
             self.assertEqual(archive.extractfile("compose.yaml").read(), files["compose.yaml"])
 
+    def test_root_security_policy_travels_with_the_source(self):
+        files = {"README.md": b"read me", "SECURITY.md": b"# Security policy",
+                 "safe-qa-service/pyproject.toml": b"[project]",
+                 "frontier-evidence-gateway/pyproject.toml": b"[project]"}
+        with patch.object(publisher, "command", return_value=archive_bytes(files)):
+            compressed, inventory = publisher.source_archive(Path("."), REVISION)
+        self.assertEqual({item["path"] for item in inventory}, set(files))
+        with tarfile.open(fileobj=io.BytesIO(gzip.decompress(compressed))) as archive:
+            self.assertEqual(archive.extractfile("SECURITY.md").read(), files["SECURITY.md"])
+
     def test_publication_sdk_mismatch_refuses_hub_initialization(self):
         with patch("importlib.metadata.version", return_value="0.0.0"):
             with self.assertRaisesRegex(publisher.PublicationError, "PINNED_PUBLICATION_SDK_REQUIRED"):
