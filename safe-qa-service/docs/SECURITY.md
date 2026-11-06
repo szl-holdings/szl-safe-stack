@@ -69,9 +69,9 @@ The source cannot prove these properties. Production owners must configure and r
   legal-hold/deletion-exception, and privacy review before accepting real evidence.
 - Every action and reusable workflow in the root `.github/workflows` is pinned to a full commit SHA,
   and the PostgreSQL and Python base images used by CI, Compose and the Dockerfiles are pinned to
-  `sha256` digests. Pinning is not review: no recorded review binds those commits and digests to
-  their upstream releases. Record one before a protected release; no SHA is invented in this
-  repository.
+  `sha256` digests. Pinning is not review, and the evidence register records no review binding
+  those commits and digests to their upstream releases. Record one before a protected release; no
+  SHA is invented in this repository.
 - The Kubernetes v2 template uses the recognized `SAFE_QA_PRODUCTION_MODE=true` and
   `SAFE_QA_AUTH_MODE=oidc` settings. The template remains `NOT_DEPLOYED`; render/admission/live
   readback, OIDC negative tests, and exact runtime configuration are still required.
