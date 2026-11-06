@@ -97,7 +97,8 @@ applies all migrations to disposable PostgreSQL, runs the real database tests,
 builds both images and checks both APIs through the local Compose stack. It has
 read-only repository permissions and receives no provider credentials.
 Before installing application dependencies, a separately hash-locked `pip-audit`
-environment scans the runtime, build, test, publication and auditor locks.
+environment scans the runtime, build, test, publication, auditor and
+lock-tooling locks.
 Vulnerabilities and audit errors fail the check; no advisory exemptions are used.
 The scan queries the public vulnerability service and is point-in-time evidence,
 not proof that an application or its operating system has no vulnerabilities.

@@ -131,6 +131,10 @@ rendered manifest is admitted and read back in the exact target cluster.
 - `GET /api/v1/schemas/evaluation-response`
 - `POST /api/v1/evaluations` — scope `evaluate`
 - `GET /api/v1/audit/verify` — scope `audit:read`
+- `GET /api/v1/schemas/synthetic-request`
+- `POST /api/v1/synthetic/evaluations` — scope `evaluate`; bounded routing of synthetic software-QA
+  fixtures only, always `simulation_only=true`, `evidence_verified=false`, and
+  `release_authorized=false`, with an audit receipt for every accepted request
 - `GET /api/v2/schemas/deployment-plan`
 - `GET /api/v2/schemas/approval-bundle`
 - `POST /api/v2/control/plans` — human OIDC principal, scope `control:plan`, read-only preview
