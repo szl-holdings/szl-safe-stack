@@ -9,9 +9,14 @@ name: Dependabot lock sync
 #   tools/sync_locks.py against the Dependabot head and checks the result.
 # commit: write token. Never runs repository or package code. Writes only the
 #   allowlisted lock files back to the same Dependabot branch through the API
-#   (GitHub-signed, bound to the exact head that was read), then dispatches CI
-#   because commits made with GITHUB_TOKEN do not start pull_request runs
-#   without approval.
+#   (GitHub-signed, bound to the exact head that was read).
+#
+# Do not workflow_dispatch ci.yml for that commit. GitHub does not evaluate
+# workflow_dispatch job checks for a required pull request status check, so a
+# green dispatch leaves source-contract "expected". The GITHUB_TOKEN commit
+# creates approval-required pull_request runs that do not execute; ci.yml
+# starts the same source-contract job on pull_request_review (an event branch
+# protection accepts) when a reviewer submits a review of this head.
 
 on:
   pull_request:
@@ -115,7 +120,6 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write   # createCommitOnBranch on the Dependabot branch
-      actions: write    # workflow_dispatch of ci.yml for the new head
     env:
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -159,7 +163,3 @@ jobs:
           oid=$(gh api graphql --input "$RUNNER_TEMP/commit.json" --jq .data.createCommitOnBranch.commit.oid)
           test -n "$oid"
           echo "Committed $oid to $HEAD_REF"
-      - name: Dispatch CI for the new head
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"

@@ -5,9 +5,13 @@ on:
   push:
     branches: [main]
   merge_group:
-  # Lets dependabot-lock-sync.yml run source-contract on the head it commits;
-  # commits made with GITHUB_TOKEN do not start pull_request runs unapproved.
-  workflow_dispatch:
+  # Eligible for required PR checks, unlike workflow_dispatch (those job checks
+  # are ignored by branch protection). dependabot-lock-sync.yml commits with
+  # GITHUB_TOKEN, which only queues approval-required pull_request runs, so a
+  # submitted review starts this same job on the lock-synced head. The job has
+  # no `if`: a skipped required check would count as success without testing.
+  pull_request_review:
+    types: [submitted]
 
 permissions:
   contents: read
