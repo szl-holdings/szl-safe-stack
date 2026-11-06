@@ -67,14 +67,18 @@ The source cannot prove these properties. Production owners must configure and r
   target authorization and post-action readback are mandatory.
 - The ledger may contain request payloads. Complete classification, minimization, retention,
   legal-hold/deletion-exception, and privacy review before accepting real evidence.
-- The GitHub workflow currently uses major-version action tags and the PostgreSQL container uses a
-  version tag rather than verified immutable action/container digests. Pin reviewed commit and image
-  digests before protected release; no SHA is invented in this repository.
+- Every action and reusable workflow in the root `.github/workflows` is pinned to a full commit SHA,
+  and the PostgreSQL and Python base images used by CI, Compose and the Dockerfiles are pinned to
+  `sha256` digests. Pinning is not review: no recorded review binds those commits and digests to
+  their upstream releases. Record one before a protected release; no SHA is invented in this
+  repository.
 - The Kubernetes v2 template uses the recognized `SAFE_QA_PRODUCTION_MODE=true` and
   `SAFE_QA_AUTH_MODE=oidc` settings. The template remains `NOT_DEPLOYED`; render/admission/live
   readback, OIDC negative tests, and exact runtime configuration are still required.
 - No production penetration test, SBOM attestation, vulnerability waiver, independent code review,
-  hosted CI result, cloud apply, or production provider readback is claimed by documentation.
+  cloud apply, or production provider readback is claimed by documentation. The only hosted CI result
+  recorded is the GitHub readback of one `source-contract` run at revision `7ea4577` in the evidence
+  register (`EVIDENCE.md`); it is not evidence for a later revision, a release, or a deployment.
 
 Report suspected vulnerabilities through the organization's private security channel. Do not put
 secrets, exploit payloads, live target identifiers, or customer evidence in a public issue.
