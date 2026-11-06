@@ -28,7 +28,7 @@ MAX_ARCHIVE_BYTES = 32 * 1024 * 1024
 MAX_FILES = 2000
 RELEASE_FILES = frozenset({"README.md", "index.html", "source-manifest.json", "source.tar.gz", "source_payload.md"})
 SOURCE_ROOTS = frozenset({"safe-qa-service", "frontier-evidence-gateway", "tools", "tests", "hf-space", "docs", ".github"})
-ROOT_FILES = frozenset({"README.md", "LICENSE", "LICENSE.md", ".gitignore", ".gitattributes", "compose.yaml", "compose.ollama.yaml", "pyproject.toml", "requirements-publish.lock"})
+ROOT_FILES = frozenset({"README.md", "LICENSE", "LICENSE.md", "SECURITY.md", ".gitignore", ".gitattributes", "compose.yaml", "compose.ollama.yaml", "pyproject.toml", "requirements-publish.lock"})
 EXCLUDED_PARTS = frozenset({".git", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".local-ci", ".terraform", "evidence", "private", "keys", "quarantine", "outputs", "dist", "build", "wheels", "htmlcov"})
 
 
