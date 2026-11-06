@@ -126,6 +126,9 @@ jobs:
       - name: Build both containers and validate Compose
         run: |
           docker compose config --quiet
+          # The component files the Safe QA and Gateway READMEs document; parse only.
+          docker compose --file safe-qa-service/docker-compose.yml config --quiet
+          docker compose --file frontier-evidence-gateway/compose.yaml config --quiet
           docker compose build --pull
           docker image inspect "szl-safeqa-local:$SZL_BUILD_TAG" "szl-frontier-gateway-local:$SZL_BUILD_TAG" --format '{{.Id}} {{json .Config.User}}'
       - name: Start disposable local stack
