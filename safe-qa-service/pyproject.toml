@@ -15,7 +15,7 @@ dependencies = [
   "boto3==1.43.120",
   "fastapi==0.162.0",
   "kubernetes==36.0.3",
-  "oauthlib==4.0.0",
+  "oauthlib==4.0.1",
   "pydantic==2.14.1",
   "psycopg[binary]==3.3.6",
   "PyJWT[crypto]==2.15.1",
