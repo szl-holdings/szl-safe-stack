@@ -104,13 +104,13 @@ hosted CI, managed-database configuration, or deployment.
 | Packaging | dependency consistency, compilation, Ruff, coverage gate, wheel, manifest/archive digests |
 | Container | image build, non-root/read-only smoke, health behavior, SBOM and vulnerability scan at exact digest |
 | Kubernetes/Terraform | formatting/validation, no placeholders, server dry-run, admission results, exact live readback |
-| Hosted CI | a protected run URL and conclusion at the exact commit with reviewed action/container digests; observed for `7ea4577` on 2026-11-06 (below) and required again for every later commit |
+| Hosted CI | a protected run URL and conclusion at the exact commit with reviewed action/container digests; for `7ea4577` the run URL and conclusion were read back on 2026-11-06 (below), but no digest review is recorded; every later commit needs its own run, conclusion and digest review |
 
 ## Production evidence status
 
 | Claim | State | What would change it |
 |---|---|---|
-| Hosted CI | OBSERVED_PASS for `7ea4577` only (2026-11-06, below) | protected provider run and exact-revision readback for each later revision |
+| Hosted CI | OBSERVED_PASS for `7ea4577` only: GitHub readback of the run and its conclusion (2026-11-06, below); action/container digest review not recorded | protected provider run and exact-revision readback for each later revision |
 | Overall production deployment | NOT_DEPLOYED | exact live workload and complete production readback |
 | AWS infrastructure configured | NOT_PERFORMED | successful governed apply plus exact AWS readback |
 | EKS workload deployed | NOT_DEPLOYED | immutable image rollout and ready/live identity readback |
@@ -206,7 +206,10 @@ Source revision: `7ea4577a31fcbc27d774a64ca4e1bb5c2f01076a` on `main`.
 | Local container build and Compose API smoke | no Docker daemon was available in that environment | NOT_RUN |
 
 For the two hosted rows, `OBSERVED_PASS` means a provider record read back through the GitHub API,
-not a command run in this workspace. The hosted run is evidence for that exact revision only. The
-local results are engineering observations on one machine. Neither establishes hosted evidence for
-a later commit, a deployed workload, AWS enforcement, human approval, witnessing, or any clinical or
-biological claim; the production states listed above are otherwise unchanged.
+not a command run in this workspace. The hosted run is evidence for that exact revision only. That
+session did not review the run's action and container digests against their upstream releases: the
+workflow pins them by commit SHA and `sha256` digest, but pinning is not review, so that part of the
+Hosted CI requirement above remains open. The local results are engineering observations on one
+machine. Neither establishes hosted evidence for a later commit, a deployed workload, AWS
+enforcement, human approval, witnessing, or any clinical or biological claim; the production states
+listed above are otherwise unchanged.
