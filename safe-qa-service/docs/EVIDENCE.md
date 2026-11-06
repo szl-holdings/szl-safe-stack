@@ -208,8 +208,8 @@ Source revision: `7ea4577a31fcbc27d774a64ca4e1bb5c2f01076a` on `main`.
 For the two hosted rows, `OBSERVED_PASS` means a provider record read back through the GitHub API,
 not a command run in this workspace. The hosted run is evidence for that exact revision only. That
 session did not review the run's action and container digests against their upstream releases: the
-workflow pins them by commit SHA and `sha256` digest, but pinning is not review, so that part of the
-Hosted CI requirement above remains open. The local results are engineering observations on one
+workflow, Compose file and Dockerfiles pin them by commit SHA and `sha256` digest, but pinning is not
+review, so that part of the Hosted CI requirement above remains open. The local results are engineering observations on one
 machine. Neither establishes hosted evidence for a later commit, a deployed workload, AWS
 enforcement, human approval, witnessing, or any clinical or biological claim; the production states
 listed above are otherwise unchanged.
