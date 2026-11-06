@@ -160,3 +160,9 @@ OpenRouter remains disabled in the local launcher. The gateway's
 the fixed-origin adapter and missing production rate, replay and spending controls.
 Cloudflare and Tailscale configuration is not changed by Compose or CI.
 Clinical and biological claims remain unverified; this software grants no such approval.
+
+Estate on Hugging Face: models, datasets and Spaces are published under the [SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS) org.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
