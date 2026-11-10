@@ -2,6 +2,13 @@
 name = "szl-frontier-evidence-gateway"
 version = "0.2.1"
 description = "Local-first, fail-closed software evidence gateway"
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = []
 classifiers = ["Private :: Do Not Upload"]
+
+[project.urls]
+Homepage = "https://github.com/szl-holdings/szl-safe-stack"
+Source = "https://github.com/szl-holdings/szl-safe-stack/tree/main/frontier-evidence-gateway"
+Issues = "https://github.com/szl-holdings/szl-safe-stack/issues"

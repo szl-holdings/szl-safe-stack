@@ -7,6 +7,7 @@ name = "safe-qa-service"
 version = "0.2.1"
 description = "Fail-closed evidence intake and audit service; never a clinical or biological decision system."
 readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11,<3.14"
 dependencies = [
   # Floors for the 2026-10-24 source-contract audit: aiohttp 3.14.3 and certifi 2026.7.22.
@@ -23,6 +24,11 @@ dependencies = [
   "uvicorn[standard]==0.54.0",
 ]
 classifiers = ["Private :: Do Not Upload"]
+
+[project.urls]
+Homepage = "https://github.com/szl-holdings/szl-safe-stack"
+Source = "https://github.com/szl-holdings/szl-safe-stack/tree/main/safe-qa-service"
+Issues = "https://github.com/szl-holdings/szl-safe-stack/issues"
 
 [project.scripts]
 safe-qa-approval = "safe_qa_service.approval_cli:main"
