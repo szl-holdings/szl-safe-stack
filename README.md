@@ -161,3 +161,22 @@ OpenRouter remains disabled in the local launcher. The gateway's
 the fixed-origin adapter and missing production rate, replay and spending controls.
 Cloudflare and Tailscale configuration is not changed by Compose or CI.
 Clinical and biological claims remain unverified; this software grants no such approval.
+
+## Security
+
+Report suspected vulnerabilities privately as described in
+[SECURITY.md](SECURITY.md), never in an issue or pull request. Service trust
+boundaries and known residual risks are in
+[safe-qa-service/docs/SECURITY.md](safe-qa-service/docs/SECURITY.md).
+
+## Hugging Face
+
+SZL Holdings publishes models, datasets and Spaces under the
+[SZLHOLDINGS](https://huggingface.co/SZLHOLDINGS) organization. This
+repository's source mirror, `SZLHOLDINGS/szl-safe-stack`, is the private
+static Space described under [Release boundaries](#release-boundaries), so it
+does not appear in that public listing.
+
+## License
+
+Apache-2.0 — see [LICENSE](LICENSE).
