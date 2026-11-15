@@ -87,7 +87,6 @@ def _single_header(headers: Mapping[str, str], name: str) -> str | None:
         return None
     return values[0] if isinstance(values[0], str) else None
 
-
 @dataclass
 class GatewayService:
     config: GatewayConfig
@@ -110,7 +109,10 @@ class GatewayService:
             }
         if method == "GET" and path == "/health/ready":
             try:
-                ledger = self.ledger.verify()
+                # O(1) against the last fully verified chain state; falls back
+                # to a full verify() on any count or head mismatch, and
+                # serve() fully verifies once at startup so the cache is primed.
+                ledger = self.ledger.verify_head()
             except LedgerIntegrityError:
                 return 503, {
                     "schema_version": "szl.frontier.readiness.v1",
@@ -131,6 +133,28 @@ class GatewayService:
                 "scope": "gateway_and_receipt_ledger_only",
                 "ledger": ledger,
                 "provider_capability_is_readiness": False,
+            }
+        if method == "GET" and path == "/health/verify":
+            # Full O(n) chain re-verification, on demand and authenticated;
+            # it is deliberately separate from the O(1) readiness probe.
+            try:
+                ledger = self.ledger.verify()
+            except LedgerIntegrityError:
+                return 503, {
+                    "schema_version": "szl.frontier.full-verification.v1",
+                    "status": "NOT_VERIFIED",
+                    "ledger": "INTEGRITY_FAILURE",
+                }
+            except LedgerUnavailableError:
+                return 503, {
+                    "schema_version": "szl.frontier.full-verification.v1",
+                    "status": "NOT_VERIFIED",
+                    "ledger": "UNAVAILABLE",
+                }
+            return 200, {
+                "schema_version": "szl.frontier.full-verification.v1",
+                "status": "VERIFIED",
+                "ledger": ledger,
             }
         if method == "GET" and path == "/v1/capabilities":
             return 200, self.config.public_capabilities()
@@ -180,7 +204,6 @@ class GatewayService:
         if detail:
             result["detail"] = detail
         return result
-
 
 def _handler(service: GatewayService) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
@@ -255,7 +278,6 @@ def _handler(service: GatewayService) -> type[BaseHTTPRequestHandler]:
             return
 
     return Handler
-
 
 def serve(service: GatewayService) -> None:
     service.ledger.verify()
