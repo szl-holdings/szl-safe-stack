@@ -82,10 +82,53 @@ services:
       start_period: 10s
     restart: unless-stopped
 
+  # Opt-in edge services. They are excluded from every default command: the
+  # launcher, `docker compose up` and the CI smoke stack all start without
+  # them; they run only with an explicit `--profile edge`. They publish
+  # additional loopback ports and change no default service, network or port.
+  edge-envoy:
+    profiles: [edge]
+    image: envoyproxy/envoy:v1.40.2@sha256:8de97e654644827d62afdbf7e1d3dc9fee01a8690d410dd1c63a30dc6b6cecbb
+    command: ["envoy", "-c", "/etc/envoy/envoy.yaml", "--service-cluster", "szl-safe-stack-edge"]
+    depends_on:
+      gateway:
+        condition: service_healthy
+      safeqa:
+        condition: service_healthy
+      edge-otel:
+        condition: service_started
+    volumes:
+      - ./edge/envoy.yaml:/etc/envoy/envoy.yaml:ro
+    ports:
+      - 127.0.0.1:${SZL_EDGE_GATEWAY_PORT:-8790}:8790
+      - 127.0.0.1:${SZL_EDGE_SAFEQA_PORT:-8090}:8090
+    networks: [audit, gateway, edge]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  edge-otel:
+    profiles: [edge]
+    image: otel/opentelemetry-collector-contrib@sha256:3f6274fe609da4f9964fbc2ef36b83d08d47964fbb11629251393590d3924072
+    volumes:
+      - ./edge/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+    networks: [edge]
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
 networks:
   audit:
     driver: bridge
   gateway:
+    driver: bridge
+  edge:
     driver: bridge
 
 volumes:

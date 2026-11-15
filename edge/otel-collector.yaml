@@ -1,0 +1,43 @@
+# OpenTelemetry Collector configuration for the opt-in compose profile
+# "edge" (szl-safe-stack). Mounted read-only at
+# /etc/otelcol-contrib/config.yaml in edge-otel.
+#
+# Image: otel/opentelemetry-collector-contrib@sha256:3f6274fe609da4f9964fbc2ef36b83d08d47964fbb11629251393590d3924072
+# (documented version 0.118.0; the same digest binary-validated in the
+# szl-holdings/platform audit COLLECTOR_0118_COMPATIBILITY_20261113.json,
+# where a debug-exporter config of this shape passed `validate`.)
+#
+# Scope and honesty:
+# - The debug exporter prints telemetry to the container log only. Nothing is
+#   sent to any external destination.
+# - CI does not start the "edge" profile; this config runs only when an
+#   operator starts the profile locally.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [debug]

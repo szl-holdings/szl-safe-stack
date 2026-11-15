@@ -91,6 +91,30 @@ delete them to work around migration or integrity failures. Initialization SQL
 runs only for a new PostgreSQL volume; existing installations must use the
 [migration procedure](safe-qa-service/docs/MIGRATION_003.md).
 
+## Opt-in edge profile
+
+An optional compose profile adds local observability without changing any
+default behavior: `edge-envoy` (Envoy v1.40.2, digest-pinned) fronts the
+gateway and Safe QA on additional host loopback ports, and `edge-otel`
+(OpenTelemetry Collector contrib 0.118.0, digest-pinned; debug exporter only,
+no external destination) receives OTLP traces from it. The launcher, plain
+`docker compose up` and the CI smoke stack never start these services; they
+run only with an explicit `--profile edge`:
+
+```powershell
+docker compose --profile edge up -d edge-envoy edge-otel
+Invoke-RestMethod http://127.0.0.1:8790/health/live
+docker compose logs edge-otel
+```
+
+The proxy ports are `127.0.0.1:8790` (gateway) and `127.0.0.1:8090` (Safe
+QA); override them with `SZL_EDGE_GATEWAY_PORT` and `SZL_EDGE_SAFEQA_PORT`.
+Both edge containers are read-only, drop all Linux capabilities, disable new
+privileges and join only the bridge networks they need. The profile is a
+local diagnostic aid, not a deployment boundary: CI does not start or
+validate it, and Envoy's upstream OpenTelemetry tracer extension is
+documented as work-in-progress and not for production use.
+
 ## Verify the Python build
 
 The root workflow `.github/workflows/ci.yml` runs as check `source-contract`.
