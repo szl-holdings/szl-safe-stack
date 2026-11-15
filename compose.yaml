@@ -72,9 +72,12 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     healthcheck:
-      test: [CMD, python, -c, "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8787/health/ready', headers={'Authorization': 'Bearer ' + os.environ['SZL_GATEWAY_BEARER_TOKEN']}); urllib.request.urlopen(request, timeout=2)"]
+      # The readiness probe re-reads only the verified chain head, but it can
+      # queue behind the ledger's 5s SQLite busy_timeout, so the probe budget
+      # must exceed it: 6s client timeout, 8s compose timeout.
+      test: [CMD, python, -c, "import os, urllib.request; request = urllib.request.Request('http://127.0.0.1:8787/health/ready', headers={'Authorization': 'Bearer ' + os.environ['SZL_GATEWAY_BEARER_TOKEN']}); urllib.request.urlopen(request, timeout=6)"]
       interval: 5s
-      timeout: 3s
+      timeout: 8s
       retries: 12
       start_period: 10s
     restart: unless-stopped
