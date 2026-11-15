@@ -77,7 +77,10 @@ Invoke-RestMethod http://127.0.0.1:8787/v1/evaluate -Method Post -Headers $gatew
 docker compose ps
 ```
 
-Gateway readiness checks its running API and complete receipt chain. Safe QA
+Gateway readiness checks its running API and the verified head of its local
+receipt chain; the complete chain is fully verified at gateway startup and on
+every append, the authenticated `GET /health/verify` endpoint re-verifies the
+whole chain on demand, and any mismatch fails closed to `NOT_READY`. Safe QA
 readiness checks the PostgreSQL schema, audit chain and pending evidence exports.
 The built-in case returns `INSUFFICIENT_EVIDENCE`, with deployment and model
 promotion `NOT_GRANTED`. It appends a local receipt without calling a model.
