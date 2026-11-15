@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import socket
 import tempfile
@@ -282,6 +283,110 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(status, 503)
         self.assertEqual(payload["status"], "NOT_READY")
         self.assertEqual(payload["ledger"], "UNAVAILABLE")
+
+    def test_readiness_reuses_verified_head_without_full_reverify(self) -> None:
+        status, payload = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        receipt = self.ledger.append({"event": "warm"})
+        # append() re-verified the chain and refreshed the cached head, so
+        # readiness must answer from the cache without a full re-verify.
+        with patch.object(
+            self.ledger, "verify", side_effect=AssertionError("full verify must not run")
+        ):
+            status, payload = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "READY")
+        self.assertEqual(payload["ledger"]["receipt_count"], 1)
+        self.assertEqual(payload["ledger"]["head_hash"], receipt["event_hash"])
+        self.assertEqual(payload["ledger"]["status"], "VERIFIED")
+
+    def test_readiness_detects_external_tampering(self) -> None:
+        self.ledger.append({"event": 1})
+        status, _ = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        # An external writer bypasses the append-only triggers; the changed
+        # row count forces a full re-verification, which the forged row fails.
+        with closing(sqlite3.connect(self.config.database_path)) as connection, connection:
+            connection.execute(
+                """INSERT INTO receipts(
+                       sequence, event_id, created_at, previous_hash, event_hash,
+                       canonical_event, hash_version
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    2,
+                    str(uuid.uuid4()),
+                    "2026-01-01T00:00:00Z",
+                    "0" * 64,
+                    "f" * 64,
+                    '{"event":"forged"}',
+                    "szl.frontier.receipt_hash.v1",
+                ),
+            )
+        status, payload = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 503)
+        self.assertEqual(payload["status"], "NOT_READY")
+        self.assertEqual(payload["ledger"], "INTEGRITY_FAILURE")
+
+    def test_readiness_accepts_external_valid_appends_then_reuses_cache(self) -> None:
+        self.ledger.append({"event": 1})
+        status, _ = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        external = ReceiptLedger(self.config.database_path)
+        appended = external.append({"event": 2})
+        # The cached count no longer matches, so readiness falls back to a
+        # full verification of the (valid) extended chain and reports it.
+        status, payload = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["ledger"]["receipt_count"], 2)
+        self.assertEqual(payload["ledger"]["head_hash"], appended["event_hash"])
+        # The fallback re-primed the cache, so the next probe is O(1) again.
+        with patch.object(
+            self.ledger, "verify", side_effect=AssertionError("full verify must not run")
+        ):
+            status, payload = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["ledger"]["head_hash"], appended["event_hash"])
+
+    def test_readiness_detects_swapped_ledger_file_with_unchanged_count(self) -> None:
+        self.ledger.append({"event": 1})
+        status, _ = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 200)
+        other_path = Path(self.temp.name) / "other.sqlite3"
+        other = ReceiptLedger(other_path)
+        other.append({"event": "swapped"})
+        # Checkpoint both WAL journals so the swap cannot be replayed away.
+        for path in (self.config.database_path, other_path):
+            with closing(sqlite3.connect(path)) as connection:
+                connection.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        shutil.copyfile(other_path, self.config.database_path)
+        # Same row count, different valid chain: only the cached head
+        # comparison catches the swap, and it fails closed.
+        status, payload = self.service.handle("GET", "/health/ready", self.auth())
+        self.assertEqual(status, 503)
+        self.assertEqual(payload["status"], "NOT_READY")
+        self.assertEqual(payload["ledger"], "INTEGRITY_FAILURE")
+
+    def test_full_verification_endpoint_and_its_auth(self) -> None:
+        status, payload = self.service.handle("GET", "/health/verify", {})
+        self.assertEqual(status, 401)
+        receipt = self.ledger.append({"event": 1})
+        status, payload = self.service.handle("GET", "/health/verify", self.auth())
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["schema_version"], "szl.frontier.full-verification.v1")
+        self.assertEqual(payload["status"], "VERIFIED")
+        self.assertEqual(payload["ledger"]["receipt_count"], 1)
+        self.assertEqual(payload["ledger"]["head_hash"], receipt["event_hash"])
+        with closing(sqlite3.connect(self.config.database_path)) as connection, connection:
+            connection.execute("DROP TRIGGER receipts_no_update")
+            connection.execute(
+                "UPDATE receipts SET canonical_event = ? WHERE sequence = 1",
+                ('{"event":"tampered"}',),
+            )
+        status, payload = self.service.handle("GET", "/health/verify", self.auth())
+        self.assertEqual(status, 503)
+        self.assertEqual(payload["schema_version"], "szl.frontier.full-verification.v1")
+        self.assertEqual(payload["status"], "NOT_VERIFIED")
+        self.assertEqual(payload["ledger"], "INTEGRITY_FAILURE")
 
     def test_hash_chain_binds_every_immutable_envelope_field(self) -> None:
         mutations: dict[str, object] = {
