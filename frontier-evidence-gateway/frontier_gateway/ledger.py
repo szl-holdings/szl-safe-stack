@@ -65,6 +65,11 @@ class ReceiptLedger:
     def __init__(self, path: Path):
         self.path = path
         self._lock = threading.Lock()
+        # (receipt_count, head_hash) from the last full chain verification.
+        # verify_head() uses this to keep readiness O(1): the receipts table
+        # is append-only by trigger, so an unchanged row count can only be
+        # the same verified chain. Any mismatch falls back to full verify().
+        self._verified_state: tuple[int, str] | None = None
         path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
@@ -144,6 +149,10 @@ class ReceiptLedger:
                 )
         except sqlite3.Error as exc:
             raise LedgerUnavailableError("receipt could not be appended") from exc
+        # The chain was fully re-verified above before this single append-only
+        # insert, so the tail row is exactly this receipt: readiness can stay
+        # O(1) without re-hashing the whole chain.
+        self._verified_state = (sequence, event_hash)
         return {
             "schema_version": "szl.frontier.receipt.v2",
             "hash_version": HASH_VERSION,
@@ -240,12 +249,81 @@ class ReceiptLedger:
             raise
         except sqlite3.Error as exc:
             raise LedgerUnavailableError("receipt ledger could not be read") from exc
+        # Prime the O(1) readiness cache; read from locals, not the cursor,
+        # so an empty chain caches (0, genesis) rather than staying unset.
+        self._verified_state = (count, head)
         return {
             "schema_version": "szl.frontier.ledger.verification.v2",
             "hash_version": HASH_VERSION,
             "status": "VERIFIED",
             "receipt_count": count,
             "head_hash": head,
+        }
+
+    def verify_head(self) -> dict[str, object]:
+        """O(1) readiness check against the last fully verified chain state.
+
+        The receipts table is append-only by trigger, so when the row count
+        matches the count from the last full verification, the only reachable
+        chain is that same verified chain: this re-reads the tail receipt,
+        re-links it to its predecessor, and re-checks its stored head hash
+        against the cached head. Any mismatch - an external writer, a swapped
+        ledger file, a first call before any verification - falls back to a
+        full verify(), so the check stays fail-closed. The returned payload is
+        byte-identical in shape to verify().
+        """
+        try:
+            with closing(self._connect()) as connection:
+                count = int(
+                    connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0]
+                )
+                tail = None
+                previous_hash = GENESIS_HASH
+                if count:
+                    tail = connection.execute(
+                        """SELECT sequence, previous_hash, event_hash, hash_version
+                           FROM receipts WHERE sequence = ?""",
+                        (count,),
+                    ).fetchone()
+                    if count > 1:
+                        row = connection.execute(
+                            "SELECT event_hash FROM receipts WHERE sequence = ?",
+                            (count - 1,),
+                        ).fetchone()
+                        if row is not None:
+                            previous_hash = row[0]
+        except sqlite3.Error as exc:
+            raise LedgerUnavailableError("receipt ledger could not be read") from exc
+        cached = self._verified_state
+        if cached is None or cached[0] != count or count == 0:
+            return self.verify()
+        if tail is None:
+            raise LedgerIntegrityError(
+                f"receipt ledger is missing its tail receipt at {count}"
+            )
+        sequence, stored_previous, stored_hash, hash_version = tail
+        if sequence != count:
+            raise LedgerIntegrityError(
+                f"receipt sequence is not contiguous at {sequence}"
+            )
+        if hash_version != HASH_VERSION:
+            raise LedgerIntegrityError(
+                f"receipt {sequence} uses unsupported hash version {hash_version!r}"
+            )
+        if stored_hash != cached[1]:
+            raise LedgerIntegrityError(
+                f"receipt {sequence} does not match the last verified chain head"
+            )
+        if stored_previous != previous_hash:
+            raise LedgerIntegrityError(
+                f"receipt {sequence} has a broken previous_hash link"
+            )
+        return {
+            "schema_version": "szl.frontier.ledger.verification.v2",
+            "hash_version": HASH_VERSION,
+            "status": "VERIFIED",
+            "receipt_count": count,
+            "head_hash": stored_hash,
         }
 
 # Restore measurement contract ported from private szl-holdings/szl-estate-os
