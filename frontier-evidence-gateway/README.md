@@ -6,7 +6,7 @@ This is a local-first evidence classifier for **software infrastructure only**. 
 
 It complements the canonical `szl-holdings/a11oy` governed-inference integration at audited revision `0505a41a5600c6d71ea3e2523bb6107c9fa5e18f`. That repository already contains the Ollama/OpenRouter registry, sovereign Tailscale mesh, bounded provider HTTP transport, budget router, Cloudflare worker, and container integration. This gateway is only a local evidence/readiness wrapper; it does not replace or silently route around `a11oy`. The audited `a11oy` CI is currently failing, so no deployment claim follows from either codebase.
 
-It does not promote models, deploy workloads, administer Cloudflare or Tailscale, revoke credentials, make clinical or biological decisions, or turn a model response into approval. Provider output is always `UNVERIFIED_MODEL_OUTPUT`. `READY` means only that the gateway and complete local receipt chain passed their checks.
+It does not promote models, deploy workloads, administer Cloudflare or Tailscale, revoke credentials, make clinical or biological decisions, or turn a model response into approval. Provider output is always `UNVERIFIED_MODEL_OUTPUT`. `READY` means only that the gateway and the verified head of its local receipt chain passed their checks; the complete chain is fully verified at startup and on every append, and the authenticated `GET /health/verify` endpoint re-verifies the whole chain on demand.
 
 ## Run locally
 
