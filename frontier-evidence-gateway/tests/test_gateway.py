@@ -288,8 +288,9 @@ class GatewayTests(unittest.TestCase):
         status, payload = self.service.handle("GET", "/health/ready", self.auth())
         self.assertEqual(status, 200)
         receipt = self.ledger.append({"event": "warm"})
-        # append() re-verified the chain and refreshed the cached head, so
-        # readiness must answer from the cache without a full re-verify.
+        # Append verifies under its writer transaction, then invalidates the
+        # read cache. An explicit fresh audit authorizes later cache reuse.
+        self.ledger.verify()
         with patch.object(
             self.ledger, "verify", side_effect=AssertionError("full verify must not run")
         ):
@@ -339,7 +340,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["ledger"]["receipt_count"], 2)
         self.assertEqual(payload["ledger"]["head_hash"], appended["event_hash"])
-        # The fallback re-primed the cache, so the next probe is O(1) again.
+        # The fallback re-primed the cache for a stable indexed-tail probe.
         with patch.object(
             self.ledger, "verify", side_effect=AssertionError("full verify must not run")
         ):
