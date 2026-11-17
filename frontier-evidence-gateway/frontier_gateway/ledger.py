@@ -7,6 +7,7 @@ import re
 import sqlite3
 import tempfile
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from contextlib import closing
@@ -64,12 +65,13 @@ def _hash_envelope(
 class ReceiptLedger:
     def __init__(self, path: Path):
         self.path = path
-        self._lock = threading.Lock()
-        # (receipt_count, head_hash) from the last full chain verification.
-        # verify_head() uses this to keep readiness O(1): the receipts table
-        # is append-only by trigger, so an unchanged row count can only be
-        # the same verified chain. Any mismatch falls back to full verify().
+        self._lock = threading.RLock()
+        # A cached proof is reusable only for unchanged local storage metadata
+        # and a bounded monotonic age. It is not an independent witness.
         self._verified_state: tuple[int, str] | None = None
+        self._verified_storage: tuple[object, ...] | None = None
+        self._verified_at: float | None = None
+        self._continuity_anchor: tuple[int, str] | None = None
         path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
@@ -113,55 +115,45 @@ class ReceiptLedger:
 
     def append(self, event: dict[str, Any]) -> dict[str, object]:
         canonical = _canonical(event)
-        try:
-            with self._lock, closing(self._connect()) as connection, connection:
-                # Never extend a chain that already fails verification.
-                self.verify()
-                connection.execute("BEGIN IMMEDIATE")
-                previous = connection.execute(
-                    "SELECT sequence, event_hash FROM receipts ORDER BY sequence DESC LIMIT 1"
-                ).fetchone()
-                sequence = int(previous[0]) + 1 if previous else 1
-                previous_hash = previous[1] if previous else GENESIS_HASH
-                event_id = str(uuid.uuid4())
-                created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                event_hash = _hash_envelope(
-                    sequence=sequence,
-                    event_id=event_id,
-                    created_at=created_at,
-                    previous_hash=previous_hash,
-                    canonical_event=canonical,
-                )
-                connection.execute(
-                    """INSERT INTO receipts(
-                           sequence, event_id, created_at, previous_hash, event_hash,
-                           canonical_event, hash_version
-                       ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        sequence,
-                        event_id,
-                        created_at,
-                        previous_hash,
-                        event_hash,
-                        canonical,
-                        HASH_VERSION,
-                    ),
-                )
-        except sqlite3.Error as exc:
-            raise LedgerUnavailableError("receipt could not be appended") from exc
-        # The chain was fully re-verified above before this single append-only
-        # insert, so the tail row is exactly this receipt: readiness can stay
-        # O(1) without re-hashing the whole chain.
-        self._verified_state = (sequence, event_hash)
-        return {
-            "schema_version": "szl.frontier.receipt.v2",
-            "hash_version": HASH_VERSION,
-            "sequence": sequence,
-            "event_id": event_id,
-            "created_at": created_at,
-            "previous_hash": previous_hash,
-            "event_hash": event_hash,
-        }
+        with self._lock:
+            self._invalidate_cache()
+            try:
+                with closing(self._connect()) as connection, connection:
+                    # Acquire the SQLite writer reservation BEFORE checking the
+                    # chain. Verification and INSERT share this transaction.
+                    connection.execute("BEGIN IMMEDIATE")
+                    proof = self._verify_connection(connection)
+                    sequence = int(proof["receipt_count"]) + 1
+                    previous_hash = str(proof["head_hash"])
+                    event_id = str(uuid.uuid4())
+                    created_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                    event_hash = _hash_envelope(
+                        sequence=sequence, event_id=event_id, created_at=created_at,
+                        previous_hash=previous_hash, canonical_event=canonical,
+                    )
+                    connection.execute(
+                        """INSERT INTO receipts(
+                            sequence, event_id, created_at, previous_hash, event_hash,
+                            canonical_event, hash_version
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                        (sequence, event_id, created_at, previous_hash,
+                         event_hash, canonical, HASH_VERSION),
+                    )
+            except sqlite3.Error as exc:
+                raise LedgerUnavailableError("receipt could not be appended") from exc
+            # An external writer can commit immediately after this transaction.
+            # Retain continuity, but never stamp unknown post-commit bytes as a
+            # cached proof. The next read performs a fresh snapshot audit.
+            self._continuity_anchor = (sequence, event_hash)
+            return {
+                "schema_version": "szl.frontier.receipt.v2",
+                "hash_version": HASH_VERSION,
+                "sequence": sequence,
+                "event_id": event_id,
+                "created_at": created_at,
+                "previous_hash": previous_hash,
+                "event_hash": event_hash,
+            }
 
     @staticmethod
     def _verify_envelope_fields(
@@ -195,63 +187,51 @@ class ReceiptLedger:
                 f"receipt {sequence} event is not canonical JSON"
             ) from exc
 
-    def verify(self) -> dict[str, object]:
-        previous_hash = GENESIS_HASH
-        count = 0
-        head = GENESIS_HASH
-        expected_sequence = 1
-        try:
-            with closing(self._connect()) as connection:
-                rows = connection.execute(
-                    """SELECT sequence, event_id, created_at, previous_hash, event_hash,
-                              canonical_event, hash_version
-                       FROM receipts ORDER BY sequence"""
-                )
-                for row in rows:
-                    (
-                        sequence,
-                        event_id,
-                        created_at,
-                        stored_previous,
-                        stored_hash,
-                        canonical,
-                        hash_version,
-                    ) = row
-                    count += 1
-                    if sequence != expected_sequence:
-                        raise LedgerIntegrityError(
-                            f"receipt sequence is not contiguous at {sequence}"
-                        )
-                    if hash_version != HASH_VERSION:
-                        raise LedgerIntegrityError(
-                            f"receipt {sequence} uses unsupported hash version {hash_version!r}"
-                        )
-                    if stored_previous != previous_hash:
-                        raise LedgerIntegrityError(
-                            f"receipt {sequence} has a broken previous_hash link"
-                        )
-                    self._verify_envelope_fields(sequence, event_id, created_at, canonical)
-                    expected = _hash_envelope(
-                        sequence=sequence,
-                        event_id=event_id,
-                        created_at=created_at,
-                        previous_hash=stored_previous,
-                        canonical_event=canonical,
-                    )
-                    if stored_hash != expected:
-                        raise LedgerIntegrityError(
-                            f"receipt {sequence} hash does not match its immutable envelope"
-                        )
-                    previous_hash = stored_hash
-                    head = stored_hash
-                    expected_sequence += 1
-        except LedgerIntegrityError:
-            raise
-        except sqlite3.Error as exc:
-            raise LedgerUnavailableError("receipt ledger could not be read") from exc
-        # Prime the O(1) readiness cache; read from locals, not the cursor,
-        # so an empty chain caches (0, genesis) rather than staying unset.
-        self._verified_state = (count, head)
+    def _invalidate_cache(self) -> None:
+        self._verified_state = None
+        self._verified_storage = None
+        self._verified_at = None
+
+    def _reader(self) -> sqlite3.Connection:
+        # Missing files must fail without creating an empty replacement DB.
+        connection = sqlite3.connect(
+            self.path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5.0,
+        )
+        connection.execute("PRAGMA query_only = ON")
+        connection.execute("PRAGMA busy_timeout = 5000")
+        return connection
+
+    def _storage_stamp(self) -> tuple[object, ...]:
+        """Local file-change signal, NOT a cryptographic storage attestation.
+
+        Main DB and WAL changes invalidate the cache. Shared-memory bookkeeping
+        is intentionally excluded. An administrator able to rewrite bytes and
+        forge filesystem metadata remains outside this local trust boundary.
+        """
+        result: list[object] = []
+        for suffix in ("", "-wal"):
+            path = Path(str(self.path) + suffix)
+            if path.is_symlink():
+                raise LedgerUnavailableError("ledger storage must not be a symlink")
+            try:
+                info = path.stat()
+            except FileNotFoundError:
+                if not suffix:
+                    raise LedgerUnavailableError("receipt ledger is missing") from None
+                result.append(None)
+            else:
+                # Opening a read-only WAL database may create an empty WAL.
+                # No committed frames exist in a zero-byte WAL; normalize it
+                # to absence so read bookkeeping does not invalidate proofs.
+                if suffix and info.st_size == 0:
+                    result.append(None)
+                else:
+                    result.append((info.st_dev, info.st_ino, info.st_size,
+                                   info.st_mtime_ns, info.st_ctime_ns))
+        return tuple(result)
+
+    @staticmethod
+    def _proof(count: int, head: str) -> dict[str, object]:
         return {
             "schema_version": "szl.frontier.ledger.verification.v2",
             "hash_version": HASH_VERSION,
@@ -260,71 +240,126 @@ class ReceiptLedger:
             "head_hash": head,
         }
 
-    def verify_head(self) -> dict[str, object]:
-        """O(1) readiness check against the last fully verified chain state.
+    def _verify_connection(self, connection: sqlite3.Connection) -> dict[str, object]:
+        if not connection.in_transaction:
+            raise LedgerUnavailableError("verification requires a stable transaction")
+        previous_hash = GENESIS_HASH
+        count = 0
+        anchor = self._continuity_anchor
+        rows = connection.execute(
+            """SELECT sequence, event_id, created_at, previous_hash, event_hash,
+                      canonical_event, hash_version
+               FROM receipts ORDER BY sequence"""
+        )
+        for sequence, event_id, created_at, stored_previous, stored_hash, canonical, version in rows:
+            count += 1
+            if sequence != count:
+                raise LedgerIntegrityError(f"receipt sequence is not contiguous at {sequence}")
+            if version != HASH_VERSION:
+                raise LedgerIntegrityError(f"receipt {sequence} uses unsupported hash version")
+            if stored_previous != previous_hash:
+                raise LedgerIntegrityError(f"receipt {sequence} has a broken previous_hash link")
+            self._verify_envelope_fields(sequence, event_id, created_at, canonical)
+            expected = _hash_envelope(
+                sequence=sequence, event_id=event_id, created_at=created_at,
+                previous_hash=stored_previous, canonical_event=canonical,
+            )
+            if stored_hash != expected:
+                raise LedgerIntegrityError(f"receipt {sequence} hash does not match its immutable envelope")
+            if anchor is not None and sequence == anchor[0] and stored_hash != anchor[1]:
+                raise LedgerIntegrityError("receipt chain diverges from the process continuity anchor")
+            previous_hash = stored_hash
+        if anchor is not None and count < anchor[0]:
+            raise LedgerIntegrityError("receipt chain was truncated below its continuity anchor")
+        return self._proof(count, previous_hash)
 
-        The receipts table is append-only by trigger, so when the row count
-        matches the count from the last full verification, the only reachable
-        chain is that same verified chain: this re-reads the tail receipt,
-        re-links it to its predecessor, and re-checks its stored head hash
-        against the cached head. Any mismatch - an external writer, a swapped
-        ledger file, a first call before any verification - falls back to a
-        full verify(), so the check stays fail-closed. The returned payload is
-        byte-identical in shape to verify().
+    def verify(self) -> dict[str, object]:
+        with self._lock:
+            # Clear first: no failing full audit may leave prior readiness valid.
+            self._invalidate_cache()
+            try:
+                before = self._storage_stamp()
+                with closing(self._reader()) as connection:
+                    connection.execute("BEGIN")
+                    proof = self._verify_connection(connection)
+                    after = self._storage_stamp()
+                    connection.rollback()
+                closed = self._storage_stamp()
+            except LedgerError:
+                raise
+            except (sqlite3.Error, OSError) as exc:
+                raise LedgerUnavailableError("receipt ledger could not be read") from exc
+            state = (int(proof["receipt_count"]), str(proof["head_hash"]))
+            self._continuity_anchor = state
+            # The response describes the audited transaction. Only a stable
+            # storage observation authorizes reuse of that proof on later reads.
+            if before == after == closed:
+                self._verified_state = state
+                self._verified_storage = closed
+                self._verified_at = time.monotonic()
+            return proof
+
+    def verify_head(self) -> dict[str, object]:
+        """Reuse a bounded-age snapshot proof only while local storage is stable.
+
+        The stable path reads the indexed tail, rehashes its complete envelope,
+        and checks its predecessor. It never issues an exact COUNT scan. It is
+        not a blanket O(1) claim: expiry/storage change requires a full audit.
+        A process continuity anchor rejects silent chain replacement/truncation.
         """
-        try:
-            with closing(self._connect()) as connection:
-                count = int(
-                    connection.execute("SELECT COUNT(*) FROM receipts").fetchone()[0]
-                )
-                tail = None
-                previous_hash = GENESIS_HASH
-                if count:
+        with self._lock:
+            cached = self._verified_state
+            age = None if self._verified_at is None else time.monotonic() - self._verified_at
+            if cached is None or age is None or not 0 <= age <= 30.0:
+                return self.verify()
+            try:
+                before = self._storage_stamp()
+                if before != self._verified_storage:
+                    return self.verify()
+                with closing(self._reader()) as connection:
+                    connection.execute("BEGIN")
                     tail = connection.execute(
-                        """SELECT sequence, previous_hash, event_hash, hash_version
-                           FROM receipts WHERE sequence = ?""",
-                        (count,),
+                        """SELECT sequence, event_id, created_at, previous_hash, event_hash,
+                                  canonical_event, hash_version
+                           FROM receipts ORDER BY sequence DESC LIMIT 1"""
                     ).fetchone()
-                    if count > 1:
-                        row = connection.execute(
-                            "SELECT event_hash FROM receipts WHERE sequence = ?",
-                            (count - 1,),
-                        ).fetchone()
-                        if row is not None:
-                            previous_hash = row[0]
-        except sqlite3.Error as exc:
-            raise LedgerUnavailableError("receipt ledger could not be read") from exc
-        cached = self._verified_state
-        if cached is None or cached[0] != count or count == 0:
-            return self.verify()
-        if tail is None:
-            raise LedgerIntegrityError(
-                f"receipt ledger is missing its tail receipt at {count}"
-            )
-        sequence, stored_previous, stored_hash, hash_version = tail
-        if sequence != count:
-            raise LedgerIntegrityError(
-                f"receipt sequence is not contiguous at {sequence}"
-            )
-        if hash_version != HASH_VERSION:
-            raise LedgerIntegrityError(
-                f"receipt {sequence} uses unsupported hash version {hash_version!r}"
-            )
-        if stored_hash != cached[1]:
-            raise LedgerIntegrityError(
-                f"receipt {sequence} does not match the last verified chain head"
-            )
-        if stored_previous != previous_hash:
-            raise LedgerIntegrityError(
-                f"receipt {sequence} has a broken previous_hash link"
-            )
-        return {
-            "schema_version": "szl.frontier.ledger.verification.v2",
-            "hash_version": HASH_VERSION,
-            "status": "VERIFIED",
-            "receipt_count": count,
-            "head_hash": stored_hash,
-        }
+                    if tail is None:
+                        if cached != (0, GENESIS_HASH):
+                            raise LedgerIntegrityError("receipt ledger lost its verified head")
+                    else:
+                        sequence, event_id, created_at, previous, head, canonical, version = tail
+                        if sequence != cached[0] or head != cached[1] or version != HASH_VERSION:
+                            raise LedgerIntegrityError("receipt head differs from the audited snapshot")
+                        self._verify_envelope_fields(sequence, event_id, created_at, canonical)
+                        expected = _hash_envelope(
+                            sequence=sequence, event_id=event_id, created_at=created_at,
+                            previous_hash=previous, canonical_event=canonical,
+                        )
+                        if expected != head:
+                            raise LedgerIntegrityError("receipt tail envelope changed after verification")
+                        predecessor = GENESIS_HASH
+                        if sequence > 1:
+                            row = connection.execute(
+                                "SELECT event_hash FROM receipts WHERE sequence = ?", (sequence - 1,),
+                            ).fetchone()
+                            if row is None:
+                                raise LedgerIntegrityError("receipt predecessor is missing")
+                            predecessor = row[0]
+                        if previous != predecessor:
+                            raise LedgerIntegrityError("receipt tail has a broken previous_hash link")
+                    after = self._storage_stamp()
+                    connection.rollback()
+                closed = self._storage_stamp()
+                if before != after or after != closed:
+                    self._invalidate_cache()
+                    return self.verify()
+            except LedgerError:
+                self._invalidate_cache()
+                raise
+            except (sqlite3.Error, OSError) as exc:
+                self._invalidate_cache()
+                raise LedgerUnavailableError("receipt ledger could not be read") from exc
+            return self._proof(*cached)
 
 # Restore measurement contract ported from private szl-holdings/szl-estate-os
 # estate/evidence_contract.py at 899a5b365a2b4eb01849eb3fec51e3b63ffd8ca2

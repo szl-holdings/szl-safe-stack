@@ -109,9 +109,9 @@ class GatewayService:
             }
         if method == "GET" and path == "/health/ready":
             try:
-                # O(1) against the last fully verified chain state; falls back
-                # to a full verify() on any count or head mismatch, and
-                # serve() fully verifies once at startup so the cache is primed.
+                # Reuse a bounded-age local snapshot only while storage is stable;
+                # changed/expired evidence requires a fresh full-chain audit.
+                # serve() also verifies once at startup.
                 ledger = self.ledger.verify_head()
             except LedgerIntegrityError:
                 return 503, {
@@ -136,7 +136,7 @@ class GatewayService:
             }
         if method == "GET" and path == "/health/verify":
             # Full O(n) chain re-verification, on demand and authenticated;
-            # it is deliberately separate from the O(1) readiness probe.
+            # it is deliberately separate from the cached readiness path.
             try:
                 ledger = self.ledger.verify()
             except LedgerIntegrityError:
